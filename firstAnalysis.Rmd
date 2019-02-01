@@ -1,0 +1,160 @@
+---
+title: "firstAnalysis"
+author: "Jean-Francois Chartier"
+date: "17 janvier 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+
+#install packages
+```{r}
+if ("quanteda" %in% installed.packages()==FALSE){
+  install.packages('quanteda',dependencies = TRUE)
+}
+library(quanteda)
+if ("stringr" %in% installed.packages()==FALSE){
+  install.packages('quanteda',dependencies = TRUE)
+}
+library(stringr)
+
+if ("magrittr" %in% installed.packages()==FALSE){
+  install.packages('quanteda',dependencies = TRUE)
+}
+library(magrittr)
+if ("topicmodels" %in% installed.packages()==FALSE){
+  install.packages('quanteda',dependencies = TRUE)
+}
+library(topicmodels)
+
+if ("caret" %in% installed.packages()==FALSE){
+  install.packages('caret',dependencies = TRUE)
+}
+library(caret)
+if ("rpart" %in% installed.packages()==FALSE){
+  install.packages('rpart',dependencies = TRUE)
+}
+library(rpart)
+if ("textstem" %in% installed.packages()==FALSE){
+  install.packages('textstem',dependencies = TRUE)
+}
+library(textstem)
+
+```
+
+#Load data
+```{r}
+load("df_training_set.rda")
+load("df_test_set.rda")
+```
+
+```{r}
+table(df_training_set$codename)
+
+table(df_test_set$SPONSOR2)
+```
+
+##cleaning corpus
+```{r}
+#library(stringr)
+# tokenisation selon quanteda
+preprocesCorpus=stringr::str_replace_all(df_training_set$seltext,"[\r\n]" , "")
+#remove all non graphical caracther
+preprocesCorpus=stringr::str_replace_all(preprocesCorpus,"[^[:graph:]]", " ")
+#remove whitespace
+preprocesCorpus=stringr::str_squish(preprocesCorpus)
+```
+
+##Tokinization and word filtering
+```{r}
+
+preprocesCorpus=quanteda::tokens(x=preprocesCorpus,what="word", remove_punct = TRUE, remove_numbers = TRUE, remove_separators = TRUE,remove_hyphens = TRUE, remove_symbols=TRUE, remove_url = TRUE)
+
+preprocesCorpus=quanteda::tokens_tolower(preprocesCorpus)
+
+myStopWords=unique(c(stopwords("en", source = "smart")))
+
+# filtrer selon un antidictionnaire et singleton
+preprocesCorpus=quanteda::tokens_remove(preprocesCorpus, case_insensitive = F, valuetype = "glob", pattern=myStopWords, min_nchar=3)
+
+#lemmatization
+preprocesCorpus=sapply(preprocesCorpus, FUN = function(seg)  paste0(textstem::lemmatize_words(seg), collapse = " "))
+preprocesCorpus=quanteda::tokens(preprocesCorpus)
+
+print(c("corpus size after preprocessing : " , length(paste(unlist(preprocesCorpus)))))
+
+print(c("vocabulary size after preprocessing : ", length(unique(paste(unlist(preprocesCorpus))) )))
+
+
+```
+
+#Modeling 
+##vectorization of documents
+```{r ,cache=T}
+#Vectorize documents 
+matrix.regcan = quanteda::dfm(x=preprocesCorpus, tolower=FALSE)
+
+#set filter
+#minDocFreq = 2
+#maxDocFreq = length(myNyTimeMatrix)*.66
+
+#filter to rare and to frequent words and ngrams 
+#matrix.regcan<-quanteda::dfm_trim(x=matrix.regcan, min_docfreq = minDocFreq, max_docfreq = maxDocFreq, docfreq_type="count")
+
+# imprimer nombre de dimensions de la matrice
+print(paste("nombre de mots differents apres filtrage base sur la frequence documentaire : ", length(matrix.regcan@Dimnames$features)))
+
+
+```
+
+#prepare data for ml
+```{r}
+regcan.df=as.matrix(matrix.regcan) %>%as.data.frame(.)
+#add dependant variable
+regcan.df$classTargetPred=as.factor(df_training_set$codename)
+
+```
+
+
+
+#decesion tree
+```{r}
+
+rpartTree <- rpart(classTargetPred ~ ., data = regcan.df)
+#eval on train set !!!!
+rpart.predict.train=predict(rpartTree, newdata = regcan.df, type="class")
+
+
+eval<-caret::confusionMatrix(data=rpart.predict.train, reference=as.factor(regcan.df$classTargetPred), mode="everything")
+eval
+
+```
+
+##visualize tree
+```{r}
+plot(rpartTree)
+text(rpartTree)
+
+
+library(rpart.plot)
+rpart.plot(rpartTree, type = 5, extra = 8, clip.right.labs=T, branch=1, fallen.leaves =T, add.labs=T, legend.x=NA,tweak=4, compress=F,ycompress = FALSE, nn.space=.0, space =0, gap=0, uniform=F)
+```
+
+#random forest
+something fuck somewhere
+probably attribute names (e.g. words with "'" )
+```{r}
+#random forest
+#random.forest.fit=ranger::ranger(classTargetPred ~., data = regcan.df, num.trees=500, num.threads=6)
+
+
+#eval<-caret::confusionMatrix(data=naive.bayes.fit, reference=as.factor(regcan.df$class.industry), mode="everything")
+#eval
+```
+
