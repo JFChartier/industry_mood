@@ -48,38 +48,13 @@ library(textstem)
 
 ```
 
-#Load data
+
+
+#read data
 ```{r}
-load("df_training_set.rda")
-load("df_test_set.rda")
-
-load("df_training_set_2.rda")
-
-df_training_set=rbind(df_training_set, df_training_set_2)
-id.doc <- unique(df_training_set_2$ID_final)
-#id.doc=unique(str_trim(id.doc, "both"))
-id.doc=as.factor(id.doc)
-#df_test_set$ID_final=str_trim(df_test_set$ID_final, "both") %>%as.factor(.)
-
-df_test_set.new = df_test_set[!(df_test_set$ID_final %in% id.doc),]
-#check 
-is.present=sapply(id.doc, function(x){
-  x%in%df_test_set$ID_final
-})
-
-
+mood.industry.data=readRDS("mood.industry.data.rds")
 ```
 
-```{r}
-table(df_training_set$codename)
-
-table(df_test_set$SPONSOR2)
-```
-
-#build LSA model from whole corpus
-```{r}
-
-```
 
 
 ##cleaning corpus

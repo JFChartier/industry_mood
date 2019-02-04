@@ -1,0 +1,63 @@
+---
+title: "PrepareData"
+author: "Jean-Francois Chartier"
+date: "4 février 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#install packages
+```{r}
+
+if ("stringr" %in% installed.packages()==FALSE){
+  install.packages('quanteda',dependencies = TRUE)
+}
+library(stringr)
+
+if ("magrittr" %in% installed.packages()==FALSE){
+  install.packages('quanteda',dependencies = TRUE)
+}
+library(magrittr)
+
+
+```
+
+#Load data
+```{r}
+load("df_training_set.rda")
+load("df_test_set.rda")
+
+load("df_training_set_2.rda")
+
+df_training_set=rbind(df_training_set, df_training_set_2)
+id.doc <- unique(df_training_set_2$ID_final)
+#id.doc=unique(str_trim(id.doc, "both"))
+id.doc=as.factor(id.doc)
+#df_test_set$ID_final=str_trim(df_test_set$ID_final, "both") %>%as.factor(.)
+
+df_test_set.new = df_test_set[!(df_test_set$ID_final %in% id.doc),]
+#check 
+is.present=sapply(id.doc, function(x){
+  x%in%df_test_set$ID_final
+})
+
+
+```
+
+#save useful data only
+```{r}
+mood.industry.data=data.frame(ID_final=df_training_set$ID_final, text=df_training_set$seltext, sponsor.feature=df_training_set$SPONSOR2, type.feature=df_training_set$TYPE, act.feature=df_training_set$ACT, label_of_class=df_training_set$codename, training.set=rep(T,length(df_training_set$seltext)))
+
+mood.industry.data=rbind(mood.industry.data, data.frame(ID_final=df_test_set.new$ID_final, text=df_test_set.new$group_sentences, sponsor.feature=df_test_set.new$SPONSOR2, type.feature=df_test_set.new$TYPE, act.feature=df_test_set.new$ACT, label_of_class= rep(NA,length(df_test_set.new$group_sentences)), training.set= rep(F,length(df_test_set.new$group_sentences))))
+
+#trim data
+mood.industry.data$text=str_trim(mood.industry.data$text)
+
+saveRDS(mood.industry.data, "mood.industry.data.rds")
+```

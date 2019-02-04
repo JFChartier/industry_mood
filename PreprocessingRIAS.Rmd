@@ -1,0 +1,136 @@
+---
+title: "PreprocessingRIAS"
+author: "Jean-Francois Chartier"
+date: "4 février 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#install packages
+```{r}
+if ("quanteda" %in% installed.packages()==FALSE){
+  install.packages('quanteda',dependencies = TRUE)
+}
+library(quanteda)
+if ("stringr" %in% installed.packages()==FALSE){
+  install.packages('quanteda',dependencies = TRUE)
+}
+library(stringr)
+
+if ("magrittr" %in% installed.packages()==FALSE){
+  install.packages('quanteda',dependencies = TRUE)
+}
+library(magrittr)
+if ("textstem" %in% installed.packages()==FALSE){
+  install.packages('textstem',dependencies = TRUE)
+}
+library(textstem)
+
+```
+
+#read data
+```{r}
+mood.industry.data=readRDS("mood.industry.data.rds")
+```
+
+
+
+#cleaning corpus
+```{r}
+#library(stringr)
+# tokenisation selon quanteda
+preprocesCorpus=stringr::str_replace_all(mood.industry.data$text,"[\r\n]" , "")
+#remove all non graphical caracther
+preprocesCorpus=stringr::str_replace_all(preprocesCorpus,"[^[:graph:]]", " ")
+#remove whitespace
+preprocesCorpus=stringr::str_squish(preprocesCorpus)
+```
+
+#Tokinization and word filtering
+```{r}
+
+preprocesCorpus=quanteda::tokens(x=preprocesCorpus,what="word", remove_punct = TRUE, remove_numbers = TRUE, remove_separators = TRUE,remove_hyphens = TRUE, remove_symbols=TRUE, remove_url = TRUE)
+
+preprocesCorpus=quanteda::tokens_tolower(preprocesCorpus)
+
+myStopWords=unique(c(stopwords("en", source = "smart")))
+
+# filtrer selon un antidictionnaire et singleton
+preprocesCorpus=quanteda::tokens_remove(preprocesCorpus, case_insensitive = F, valuetype = "glob", pattern=myStopWords, min_nchar=3)
+
+#lemmatization
+preprocesCorpus=sapply(preprocesCorpus, FUN = function(seg)  paste0(textstem::lemmatize_words(seg), collapse = " "))
+preprocesCorpus=quanteda::tokens(preprocesCorpus)
+
+#preprocesCorpus = quanteda::tokens_ngrams(preprocesCorpus, n=1:2)
+
+print(c("corpus size after preprocessing : " , length(paste(unlist(preprocesCorpus)))))
+
+print(c("vocabulary size after preprocessing : ", length(unique(paste(unlist(preprocesCorpus))) )))
+
+
+```
+
+#document*word frequency matrix modeling 
+```{r ,cache=T}
+#Vectorize documents 
+matrix.regcan = quanteda::dfm(x=preprocesCorpus, tolower=FALSE)
+
+#set filter
+minDocFreq = 2
+maxDocFreq = length(matrix.regcan)*.66
+
+#filter to rare and to frequent words and ngrams 
+matrix.regcan<-quanteda::dfm_trim(x=matrix.regcan, min_docfreq = minDocFreq, max_docfreq = maxDocFreq, docfreq_type="count")
+
+# imprimer nombre de dimensions de la matrice
+print(paste("nombre de mots differents apres filtrage base sur la frequence documentaire : ", length(matrix.regcan@Dimnames$features)))
+
+
+```
+
+#save document*word frequency matrix 
+```{r}
+saveRDS(matrix.regcan, "wordfrequency.matrix.regcan.rds")
+```
+
+#norm vectors
+```{r}
+normVector <- function(x) 
+{
+  if(sum(x)==0)
+    return (x)
+  else 
+    return (x / sqrt(sum(x^2)))
+  
+}
+
+#unit vector norm
+matrix.regcan.norm <- (t(apply(matrix.regcan, MARGIN = 1, FUN = function(x) normVector(x))))
+```
+
+
+#build LSA model from whole corpus
+```{r}
+
+svd.of.regcan.doc=RSpectra::svds(matrix.regcan.norm, 200)
+reduced.svd.regcan.doc=svd.of.regcan.doc$u %*% solve(diag((svd.of.regcan.doc$d)))
+
+#add colnames
+svd.col.names=sapply(seq(1:ncol(reduced.svd.regcan.doc)), function(x) paste0("latent", x))
+colnames(reduced.svd.regcan.doc)=svd.col.names
+```
+
+#save reduced lsa matrix
+```{r}
+saveRDS(reduced.svd.regcan.doc, "reduced.svd.regcan.doc.rds")
+```
+
+
+
