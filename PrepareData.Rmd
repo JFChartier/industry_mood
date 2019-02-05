@@ -59,5 +59,9 @@ mood.industry.data=rbind(mood.industry.data, data.frame(ID_final=df_test_set.new
 #trim data
 mood.industry.data$text=str_trim(mood.industry.data$text)
 
+#correct error in class label
+mood.industry.data$label_of_class[mood.industry.data$label_of_class=="statment_professional"]="statement_professional"
+mood.industry.data$label_of_class=droplevels(mood.industry.data$label_of_class)
+
 saveRDS(mood.industry.data, "mood.industry.data.rds")
 ```

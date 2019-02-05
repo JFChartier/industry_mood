@@ -124,7 +124,7 @@ rf.binary.label.prediction=predict(rf.model, data = data.classification.test[,(-
 #Learn multiple classes model
 ##set label
 ```{r}
-#set label to binary class
+#set label to multi class
 data.classification.train$label_of_class=as.factor(multi.class.label[id.train])
 ```
 ##learn Random Forest on subset of training set
@@ -136,7 +136,7 @@ seed=123
 id.sub.train <- sample(nrow(data.classification.train), 3/4 * nrow(data.classification.train))
 
 
-rf.multiclasses.model=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train[id.sub.train,], num.trees=500, num.threads=6, classification=T, importance="impurity")
+rf.multiclasses.model=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train[id.sub.train,], num.trees=10000, num.threads=6, classification=T, importance="impurity")
 
 #View(rf.model$variable.importance)
 
@@ -161,6 +161,57 @@ rf.multiclasses.label.prediction=predict(rf.multiclasses.model, data = data.clas
 
 
 ```
+
+
+#Learn hierarchical random forest
+
+##learn Random Forest on subset of training set
+
+```{r}
+seed=123
+#set label to binary class
+data.classification.train$label_of_class=as.factor(binary.label[id.train])
+
+#subset of id train
+id.sub.train <- sample(nrow(data.classification.train), 2/3 * nrow(data.classification.train))
+
+
+rf.bin.model=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train[id.sub.train,], num.trees=50000, num.threads=6, classification=T)
+
+#get exemplars from the "is.consultation.label" class
+id.sub.is.consultation=data.classification.train$label_of_class[id.sub.train]=="is.consultation.label"
+#set label to multi class
+data.classification.train$label_of_class=as.factor(multi.class.label[id.train])
+
+data.classification.train.consul=data.classification.train[id.sub.train,][id.sub.is.consultation,]%>%droplevels(.)
+
+#subset of id train
+#id.sub.train.consul <- sample(nrow(data.classification.train.consul), 3/4 * nrow(data.classification.train.consul))
+
+
+
+#learn model of multiclassification only on consultation exemplars
+rf.multi.model.consul=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train.consul, num.trees=50000, num.threads=6, classification=T)
+
+```
+
+##Predict with hierarchical random forest
+```{r}
+rf.bin.pred=predict(rf.bin.model, data = data.classification.train[-id.sub.train,])
+
+rf.multi.pred=predict(rf.multi.model.consul, data=data.classification.train[-id.sub.train,][rf.bin.pred$predictions=="is.consultation.label",])
+
+#join predictions
+rf.joint.pred=rf.bin.pred$predictions%>%as.character(.)
+rf.joint.pred[rf.joint.pred=="is.consultation.label"]=rf.multi.pred$predictions%>%as.character(.)
+
+my.reference=multi.class.label[id.train][-id.sub.train]%>%as.character()
+my.reference[binary.label[id.train][-id.sub.train]=="is.not.consultation.label"]=binary.label[id.train][-id.sub.train]%>%extract(.=="is.not.consultation.label")
+
+eval<-caret::confusionMatrix(data=as.factor(rf.joint.pred), reference=as.factor(my.reference), mode="everything")
+eval
+```
+
 
 #save class prediction
 ```{r}
