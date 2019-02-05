@@ -162,6 +162,57 @@ rf.multiclasses.label.prediction=predict(rf.multiclasses.model, data = data.clas
 
 ```
 
+#Learn multiple classes model with one negative class
+##set label
+```{r}
+#set label to multi class
+data.classification.train$label_of_class=(multi.class.label[id.train])%>%as.character(.)
+
+data.classification.train$label_of_class[binary.label[id.train]=="is.not.consultation.label"]=binary.label[id.train]%>%extract(.=="is.not.consultation.label")
+
+data.classification.train$label_of_class=data.classification.train$label_of_class%>%as.factor(.)%>%droplevels(.)
+```
+##learn Random Forest on subset of training set
+
+```{r}
+seed=123
+
+#subset of id train
+id.sub.train <- sample(nrow(data.classification.train), 2/3 * nrow(data.classification.train))
+
+upSampledTrain <- upSample(x = data.classification.train[id.sub.train, -c(4)], y = data.classification.train[id.sub.train,]$label_of_class, yname = "label_of_class")
+
+rf.multiclasses.model=ranger::ranger(dependent.variable.name = "label_of_class", data=upSampledTrain, num.trees=10000, num.threads=6, classification=T)
+
+#use for stratified sampling https://github.com/imbs-hl/ranger/issues/381
+#sample.fraction=c(0.5,.5,.5,.5,.5,.5,.5)
+
+#rf.multiclasses.model=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train[id.sub.train,], num.trees=0000, num.threads=6, classification=T, importance="impurity", class.weights=c(1,1,1,1,1,1,1))
+
+#View(rf.model$variable.importance)
+
+rf.multiclasses.pred=predict(rf.multiclasses.model, data = data.classification.train[-id.sub.train,])
+
+eval<-caret::confusionMatrix(data=rf.multiclasses.pred$predictions, reference=as.factor(data.classification.train$label_of_class[-id.sub.train]), mode="everything")
+eval
+
+```
+
+##learn class likelihood over  training set
+```{r}
+
+rf.multiclasses.model=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train, num.trees=10000, num.threads=6, probability=T, classification=T)
+
+```
+
+##Predict binary class on test set
+```{r}
+#do not used column 4. It is the label
+rf.multiclasses.label.prediction=predict(rf.multiclasses.model, data = data.classification.test[,(-4)])
+
+
+```
+
 
 #Learn hierarchical random forest
 
