@@ -30,6 +30,11 @@ if ("rpart" %in% installed.packages()==FALSE){
 }
 library(rpart)
 
+if ("quanteda" %in% installed.packages()==FALSE){
+  install.packages('quanteda',dependencies = TRUE)
+}
+library(quanteda)
+
 ```
 
 
@@ -39,6 +44,7 @@ library(rpart)
 mood.industry.data=readRDS("mood.industry.data.rds")
 wordfrequency.matrix.regcan=readRDS("wordfrequency.matrix.regcan.rds")
 reduced.svd.regcan.doc=readRDS("reduced.svd.regcan.doc.rds")
+ngramfrequency.matrix.regcan=readRDS("ngramfrequency.matrix.regcan.rds")
 ```
 
 #get training id
@@ -53,6 +59,8 @@ id.train=mood.industry.data$training.set==T
 #combine all features
 data.classification=cbind(mood.industry.data[,(3:7)], as.matrix(wordfrequency.matrix.regcan)%>%set_colnames(., wordfrequency.matrix.regcan@Dimnames$features), reduced.svd.regcan.doc)
 
+#add ngram dimensions
+data.classification=cbind(data.classification, as.matrix(ngramfrequency.matrix.regcan)%>%set_colnames(., ngramfrequency.matrix.regcan@Dimnames$features))
 
 #change NA in sponsor
 #data.classification=data.classification.train
@@ -227,7 +235,7 @@ data.classification.train$label_of_class=as.factor(binary.label[id.train])
 id.sub.train <- sample(nrow(data.classification.train), 2/3 * nrow(data.classification.train))
 
 
-rf.bin.model=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train[id.sub.train,], num.trees=50000, num.threads=6, classification=T)
+rf.bin.model=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train[id.sub.train,], num.trees=20000, num.threads=6, classification=T)
 
 #get exemplars from the "is.consultation.label" class
 id.sub.is.consultation=data.classification.train$label_of_class[id.sub.train]=="is.consultation.label"
@@ -242,7 +250,7 @@ data.classification.train.consul=data.classification.train[id.sub.train,][id.sub
 
 
 #learn model of multiclassification only on consultation exemplars
-rf.multi.model.consul=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train.consul, num.trees=50000, num.threads=6, classification=T)
+rf.multi.model.consul=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train.consul, num.trees=20000, num.threads=6, classification=T)
 
 ```
 
@@ -261,6 +269,8 @@ my.reference[binary.label[id.train][-id.sub.train]=="is.not.consultation.label"]
 
 eval<-caret::confusionMatrix(data=as.factor(rf.joint.pred), reference=as.factor(my.reference), mode="everything")
 eval
+View(eval$byClass)
+write.csv(eval$byClass, file = "evalRFhierarchic.csv", row.names = T, col.names = T, fileEncoding = "utf8")
 ```
 
 

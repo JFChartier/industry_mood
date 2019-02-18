@@ -94,10 +94,31 @@ print(paste("nombre de mots differents apres filtrage base sur la frequence docu
 
 
 ```
-
 #save document*word frequency matrix 
 ```{r}
 saveRDS(matrix.regcan, "wordfrequency.matrix.regcan.rds")
+```
+
+
+#document*word.ngrams frequency matrix modeling
+```{r}
+preprocesCorpus2=quanteda::tokens(preprocesCorpus, ngrams=1:2)
+#Vectorize documents 
+matrix.regcan.2 = quanteda::dfm(x=preprocesCorpus2, tolower=FALSE)
+
+#set filter
+minDocFreq = 3
+maxDocFreq = length(matrix.regcan.2)*.66
+
+#filter to rare and to frequent words and ngrams 
+matrix.regcan.2<-quanteda::dfm_trim(x=matrix.regcan.2, min_docfreq = minDocFreq, max_docfreq = maxDocFreq, docfreq_type="count")
+
+# imprimer nombre de dimensions de la matrice
+print(paste("nombre de mots differents apres filtrage base sur la frequence documentaire : ", length(matrix.regcan.2@Dimnames$features)))
+```
+#save document*word frequency matrix 
+```{r}
+saveRDS(matrix.regcan.2, "ngramfrequency.matrix.regcan.rds")
 ```
 
 #norm vectors
