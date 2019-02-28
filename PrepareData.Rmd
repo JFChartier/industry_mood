@@ -65,3 +65,28 @@ mood.industry.data$label_of_class=droplevels(mood.industry.data$label_of_class)
 
 saveRDS(mood.industry.data, "mood.industry.data.rds")
 ```
+
+
+Get new dataframe from 2019-02-19
+#save useful data only
+```{r}
+load("df_exemplars_2019-02-19.rda")
+
+mood.industry.data=data.frame(ID_final=df$ID_final, text=df$group_sentences, sponsor.feature=df$SPONSOR2, type.feature=df$TYPE, act.feature=df$ACT, label_of_class=df$codename, text.all.rias=df$RIAS_clean, stringsAsFactors = F)
+
+training.set=sapply(mood.industry.data$label_of_class, FUN = function(x){
+  ifelse(test = is.na(x), FALSE, TRUE)
+})
+mood.industry.data$training.set=training.set
+#trim data
+mood.industry.data$text=str_trim(mood.industry.data$text)
+
+#combine class labels
+statement_institution=(mood.industry.data$label_of_class=="statement_firstnations" | mood.industry.data$label_of_class=="statement_expert" |  mood.industry.data$label_of_class=="statement_institution")
+mood.industry.data$label_of_class[statement_institution]="statement_institution"
+
+statement_advocacy=(mood.industry.data$label_of_class=="statement_advocacy" | mood.industry.data$label_of_class=="statement_professional")
+mood.industry.data$label_of_class[statement_advocacy]="statement_advocacy"
+
+saveRDS(mood.industry.data, "mood.industry.data.rds")
+```

@@ -1,0 +1,108 @@
+---
+title: "PreprocessingContextRias"
+author: "Jean-Francois Chartier"
+date: "28 février 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#functions
+```{r}
+#function to project query in latent semantic space
+  #'@param matrixV, a term-dim matrix m*k, of m terms previouslly modelleled with a SVD of k latent dimensions
+  #'@param sigularValues, the k singular values of the train SVD
+  #'@param newData, a new document-term matrix n*m to be projected in the latent space of k dimensions 
+predictFromTrainSvdModel<-function(matrixV, singularValues, newData)
+{
+  call <- match.call()
+  tsa <-  newData %*% matrixV %*% solve(diag((singularValues)))
+  result <- list(docs_newspace = tsa)
+  return (result)
+}
+
+#function to create a unit normed vector
+normVector <- function(x) 
+{
+  if(sum(x)==0)
+    return (x)
+  else 
+    return (x / sqrt(sum(x^2)))
+  
+}
+#function to norm many vectors
+normRowVectors<-function(m){
+  t(apply(m, MARGIN = 1, FUN = function(x) normVector(x)))
+}
+
+```
+
+
+#read data
+```{r}
+mood.industry.data=readRDS("mood.industry.data.rds")
+wordfrequency.matrix.regcan=readRDS("wordfrequency.matrix.regcan.rds")
+
+svd.of.regcan.from.irba = readRDS("svd.of.regcan.from.irba.rds")
+reduced.svd.regcan.doc=  as.matrix(svd.of.regcan.from.irba$u %*% solve(diag((svd.of.regcan.from.irba$d)))) #%>% normRowVectors()
+#colnames(reduced.svd.regcan.doc)=svd.of.regcan.from.irba$feature.names
+```
+
+
+#cleaning corpus
+```{r}
+#library(stringr)
+# tokenisation selon quanteda
+preprocesRias=stringr::str_replace_all(mood.industry.data$text.all.rias,"[\r\n]" , "")
+#remove all non graphical caracther
+preprocesRias=stringr::str_replace_all(preprocesRias,"[^[:graph:]]", " ")
+#remove whitespace
+preprocesRias=stringr::str_squish(preprocesRias)
+```
+
+#Tokinization and word filtering
+```{r}
+
+preprocesRias=quanteda::tokens(x=preprocesRias,what="word", remove_punct = TRUE, remove_numbers = TRUE, remove_separators = TRUE,remove_hyphens = TRUE, remove_symbols=TRUE, remove_url = TRUE)
+
+preprocesRias=quanteda::tokens_tolower(preprocesRias)
+
+myStopWords=unique(c(stopwords("en", source = "smart")))
+
+preprocesRias=quanteda::tokens_remove(preprocesRias, case_insensitive = F, valuetype = "glob", pattern=myStopWords, min_nchar=3)
+
+#lemmatization
+preprocesRias=sapply(preprocesRias, FUN = function(seg)  paste0(textstem::lemmatize_words(seg), collapse = " "))
+preprocesRias=quanteda::tokens(preprocesRias)
+
+#preprocesCorpus = quanteda::tokens_ngrams(preprocesCorpus, n=1:2)
+
+print(c("corpus size after preprocessing : " , length(paste(unlist(preprocesRias)))))
+
+print(c("vocabulary size after preprocessing : ", length(unique(paste(unlist(preprocesRias))) )))
+
+
+```
+
+#projecting rias context into SVD space 
+```{r ,cache=T}
+#Vectorize documents 
+matrix.context.rias = quanteda::dfm(x=preprocesRias, tolower=FALSE)
+matrix.context.rias = quanteda::dfm_select(x=matrix.context.rias, pattern = wordfrequency.matrix.regcan, case_insensitive = TRUE, valuetype="glob")
+
+#projecting in latent space
+reduced.matrix.context.rias = predictFromTrainSvdModel(matrixV = (svd.of.regcan.from.irba$v), singularValues = svd.of.regcan.from.irba$d,  newData = as.matrix(matrix.context.rias))
+
+reduced.matrix.context.rias=normVector(reduced.matrix.context.rias$docs_newspace)
+
+colnames(reduced.matrix.context.rias)=paste0("global.rias.", svd.of.regcan.from.irba$feature.names)
+```
+
+#save 
+```{r}
+saveRDS(reduced.matrix.context.rias, "reduced.matrix.context.rias.rds")
+```

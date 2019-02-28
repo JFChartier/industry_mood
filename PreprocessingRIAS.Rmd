@@ -37,6 +37,9 @@ library(textstem)
 #read data
 ```{r}
 mood.industry.data=readRDS("mood.industry.data.rds")
+wordfrequency.matrix.regcan=readRDS("wordfrequency.matrix.regcan.rds")
+reduced.svd.regcan.doc=readRDS("reduced.svd.regcan.doc.rds")
+
 ```
 
 
@@ -83,7 +86,7 @@ print(c("vocabulary size after preprocessing : ", length(unique(paste(unlist(pre
 matrix.regcan = quanteda::dfm(x=preprocesCorpus, tolower=FALSE)
 
 #set filter
-minDocFreq = 2
+minDocFreq = 5
 maxDocFreq = length(matrix.regcan)*.66
 
 #filter to rare and to frequent words and ngrams 
@@ -102,12 +105,12 @@ saveRDS(matrix.regcan, "wordfrequency.matrix.regcan.rds")
 
 #document*word.ngrams frequency matrix modeling
 ```{r}
-preprocesCorpus2=quanteda::tokens(preprocesCorpus, ngrams=1:2)
+preprocesCorpus2=quanteda::tokens(preprocesCorpus, ngrams=2)
 #Vectorize documents 
 matrix.regcan.2 = quanteda::dfm(x=preprocesCorpus2, tolower=FALSE)
 
 #set filter
-minDocFreq = 3
+minDocFreq = 5
 maxDocFreq = length(matrix.regcan.2)*.66
 
 #filter to rare and to frequent words and ngrams 
@@ -116,7 +119,7 @@ matrix.regcan.2<-quanteda::dfm_trim(x=matrix.regcan.2, min_docfreq = minDocFreq,
 # imprimer nombre de dimensions de la matrice
 print(paste("nombre de mots differents apres filtrage base sur la frequence documentaire : ", length(matrix.regcan.2@Dimnames$features)))
 ```
-#save document*word frequency matrix 
+#save document*ngram frequency matrix 
 ```{r}
 saveRDS(matrix.regcan.2, "ngramfrequency.matrix.regcan.rds")
 ```
@@ -131,7 +134,7 @@ normVector <- function(x)
     return (x / sqrt(sum(x^2)))
   
 }
-
+matrix.regcan=readRDS("wordfrequency.matrix.regcan.rds")
 #unit vector norm
 matrix.regcan.norm <- (t(apply(matrix.regcan, MARGIN = 1, FUN = function(x) normVector(x))))
 ```
@@ -140,17 +143,26 @@ matrix.regcan.norm <- (t(apply(matrix.regcan, MARGIN = 1, FUN = function(x) norm
 #build LSA model from whole corpus
 ```{r}
 
-svd.of.regcan.doc=RSpectra::svds(matrix.regcan.norm, 200)
-reduced.svd.regcan.doc=svd.of.regcan.doc$u %*% solve(diag((svd.of.regcan.doc$d)))
-
+#svd.of.regcan.doc=RSpectra::svds(matrix.regcan.norm, 200)
+#reduced.svd.regcan.doc=svd.of.regcan.doc$u %*% solve(diag((svd.of.regcan.doc$d)))
+#saveRDS(reduced.svd.regcan.doc, "reduced.svd.regcan.doc.rds")
 #add colnames
-svd.col.names=sapply(seq(1:ncol(reduced.svd.regcan.doc)), function(x) paste0("latent", x))
-colnames(reduced.svd.regcan.doc)=svd.col.names
+#svd.col.names=sapply(seq(1:ncol(reduced.svd.regcan.doc)), function(x) paste0("latent", x))
+#colnames(reduced.svd.regcan.doc)=svd.col.names
+
+
+svd.from.irba.800=irlba::irlba(matrix.regcan.norm, 800, tol=1e-5)
+#change colnames
+svd.col.names=sapply(seq(1:length(svd.from.irba.800$d)), function(x) paste0("latent", x))
+svd.from.irba.800$feature.names = svd.col.names
+
+saveRDS(svd.from.irba.800, file = "svd.of.regcan.from.irba.800.rds")
+
 ```
 
 #save reduced lsa matrix
 ```{r}
-saveRDS(reduced.svd.regcan.doc, "reduced.svd.regcan.doc.rds")
+#saveRDS(reduced.svd.regcan.doc, "reduced.svd.regcan.doc.rds")
 ```
 
 

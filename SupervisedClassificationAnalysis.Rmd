@@ -37,15 +37,53 @@ library(quanteda)
 
 ```
 
+```{r}
+#function to create a unit normed vector
+normVector <- function(x) 
+{
+  if(sum(x)==0)
+    return (x)
+  else 
+    return (x / sqrt(sum(x^2)))
+  
+}
+#function to norm many vectors
+normRowVectors<-function(m){
+  t(apply(m, MARGIN = 1, FUN = function(x) normVector(x)))
+}
+```
 
 
 #read data
 ```{r}
 mood.industry.data=readRDS("mood.industry.data.rds")
 wordfrequency.matrix.regcan=readRDS("wordfrequency.matrix.regcan.rds")
-reduced.svd.regcan.doc=readRDS("reduced.svd.regcan.doc.rds")
+#reduced.svd.regcan.doc=readRDS("reduced.svd.regcan.doc.rds")
+
+svd.of.regcan.from.irba = readRDS("svd.of.regcan.from.irba.150.rds")
+
+reduced.svd.regcan.doc=  as.matrix(svd.of.regcan.from.irba$u %*% solve(diag((svd.of.regcan.from.irba$d)))) #%>% normRowVectors()
+colnames(reduced.svd.regcan.doc)=svd.of.regcan.from.irba$feature.names
+
 ngramfrequency.matrix.regcan=readRDS("ngramfrequency.matrix.regcan.rds")
+
+reduced.matrix.context.rias=readRDS("reduced.matrix.context.rias.rds")
 ```
+
+#read all latent models
+```{r}
+n.latents=c(50, 100, 150, 200, 300, 400, 500, 800)
+
+latent.models=lapply(n.latents, FUN = function(k){
+  svd.of.regcan.from.irba = readRDS(paste0("svd.of.regcan.from.irba.", k, ".rds"))
+  
+  reduced.svd.regcan.doc=  as.matrix(svd.of.regcan.from.irba$u %*% solve(diag((svd.of.regcan.from.irba$d)))) #%>% normRowVectors()
+  colnames(reduced.svd.regcan.doc)=paste0(k,".",svd.of.regcan.from.irba$feature.names)
+  reduced.svd.regcan.doc
+  })
+
+```
+
 
 #get training id
 ```{r}
@@ -53,13 +91,25 @@ ngramfrequency.matrix.regcan=readRDS("ngramfrequency.matrix.regcan.rds")
 id.train=mood.industry.data$training.set==T
 ```
 
+#combine all lalent models
+```{r}
+
+data.classification=do.call("cbind", latent.models)
+data.classification=cbind(mood.industry.data[,c(3:6,8)], data.classification)
+```
 
 #prepare data for ml
 ```{r}
+#only latent features in segment
+#data.classification=cbind(mood.industry.data[,c(3:6,8)],reduced.svd.regcan.doc)
+
 #combine all features
-data.classification=cbind(mood.industry.data[,(3:7)], as.matrix(wordfrequency.matrix.regcan)%>%set_colnames(., wordfrequency.matrix.regcan@Dimnames$features), reduced.svd.regcan.doc)
+data.classification=cbind(mood.industry.data[,c(3:6,8)], as.matrix(wordfrequency.matrix.regcan)%>%set_colnames(., wordfrequency.matrix.regcan@Dimnames$features), reduced.svd.regcan.doc)
 
 #add ngram dimensions
+data.classification=cbind(data.classification, reduced.matrix.context.rias)
+
+#add global.rias.latent
 data.classification=cbind(data.classification, as.matrix(ngramfrequency.matrix.regcan)%>%set_colnames(., ngramfrequency.matrix.regcan@Dimnames$features))
 
 #change NA in sponsor
@@ -188,9 +238,9 @@ seed=123
 #subset of id train
 id.sub.train <- sample(nrow(data.classification.train), 2/3 * nrow(data.classification.train))
 
-upSampledTrain <- upSample(x = data.classification.train[id.sub.train, -c(4)], y = data.classification.train[id.sub.train,]$label_of_class, yname = "label_of_class")
+#upSampledTrain <- upSample(x = data.classification.train[id.sub.train, -c(4)], y = data.classification.train[id.sub.train,]$label_of_class, yname = "label_of_class")
 
-rf.multiclasses.model=ranger::ranger(dependent.variable.name = "label_of_class", data=upSampledTrain, num.trees=10000, num.threads=6, classification=T)
+rf.multiclasses.model=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train[id.sub.train,], num.trees=10000, num.threads=6, classification=T)
 
 #use for stratified sampling https://github.com/imbs-hl/ranger/issues/381
 #sample.fraction=c(0.5,.5,.5,.5,.5,.5,.5)
