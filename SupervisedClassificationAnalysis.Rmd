@@ -60,14 +60,16 @@ mood.industry.data=readRDS("mood.industry.data.rds")
 wordfrequency.matrix.regcan=readRDS("wordfrequency.matrix.regcan.rds")
 #reduced.svd.regcan.doc=readRDS("reduced.svd.regcan.doc.rds")
 
-svd.of.regcan.from.irba = readRDS("svd.of.regcan.from.irba.150.rds")
+#svd.of.regcan.from.irba = readRDS("svd.of.regcan.from.irba.150.rds")
 
-reduced.svd.regcan.doc=  as.matrix(svd.of.regcan.from.irba$u %*% solve(diag((svd.of.regcan.from.irba$d)))) #%>% normRowVectors()
-colnames(reduced.svd.regcan.doc)=svd.of.regcan.from.irba$feature.names
+#reduced.svd.regcan.doc=  as.matrix(svd.of.regcan.from.irba$u %*% solve(diag((svd.of.regcan.from.irba$d)))) #%>% normRowVectors()
+#colnames(reduced.svd.regcan.doc)=svd.of.regcan.from.irba$feature.names
 
 ngramfrequency.matrix.regcan=readRDS("ngramfrequency.matrix.regcan.rds")
 
 reduced.matrix.context.rias=readRDS("reduced.matrix.context.rias.rds")
+
+sentiment.regcan.matrix=readRDS("sentiment.regcan.matrix.rds")
 ```
 
 #read all latent models
@@ -91,26 +93,43 @@ latent.models=lapply(n.latents, FUN = function(k){
 id.train=mood.industry.data$training.set==T
 ```
 
-#combine all lalent models
+#Combine features
+##add meta data
 ```{r}
-
-data.classification=do.call("cbind", latent.models)
-data.classification=cbind(mood.industry.data[,c(3:6,8)], data.classification)
+data.classification=mood.industry.data[,c(3:6,8)]
 ```
+
+##add word-matrix frequency
+```{r}
+data.classification=cbind(data.classification, as.matrix(wordfrequency.matrix.regcan)%>%set_colnames(., wordfrequency.matrix.regcan@Dimnames$features))
+```
+
+##add n-gram
+```{r}
+data.classification=cbind(data.classification, as.matrix(ngramfrequency.matrix.regcan)%>%set_colnames(., ngramfrequency.matrix.regcan@Dimnames$features))
+```
+
+##add sentiment features
+```{r}
+data.classification=cbind(data.classification, sentiment.regcan.matrix)
+```
+
+##add all latent models
+```{r}
+all.latent.models=do.call("cbind", latent.models)
+data.classification=cbind(data.classification, all.latent.models)
+```
+
+##add global.rias.latent
+```{r}
+#add global.rias.latent
+data.classification=cbind(data.classification, reduced.matrix.context.rias)
+
+```
+
 
 #prepare data for ml
 ```{r}
-#only latent features in segment
-#data.classification=cbind(mood.industry.data[,c(3:6,8)],reduced.svd.regcan.doc)
-
-#combine all features
-data.classification=cbind(mood.industry.data[,c(3:6,8)], as.matrix(wordfrequency.matrix.regcan)%>%set_colnames(., wordfrequency.matrix.regcan@Dimnames$features), reduced.svd.regcan.doc)
-
-#add ngram dimensions
-data.classification=cbind(data.classification, reduced.matrix.context.rias)
-
-#add global.rias.latent
-data.classification=cbind(data.classification, as.matrix(ngramfrequency.matrix.regcan)%>%set_colnames(., ngramfrequency.matrix.regcan@Dimnames$features))
 
 #change NA in sponsor
 #data.classification=data.classification.train
@@ -240,20 +259,20 @@ id.sub.train <- sample(nrow(data.classification.train), 2/3 * nrow(data.classifi
 
 #upSampledTrain <- upSample(x = data.classification.train[id.sub.train, -c(4)], y = data.classification.train[id.sub.train,]$label_of_class, yname = "label_of_class")
 
-rf.multiclasses.model=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train[id.sub.train,], num.trees=10000, num.threads=6, classification=T)
+rf.multiclasses.model=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train[id.sub.train,], num.trees=20000, num.threads=6, classification=T, importance = "impurity")
 
 #use for stratified sampling https://github.com/imbs-hl/ranger/issues/381
 #sample.fraction=c(0.5,.5,.5,.5,.5,.5,.5)
 
 #rf.multiclasses.model=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train[id.sub.train,], num.trees=0000, num.threads=6, classification=T, importance="impurity", class.weights=c(1,1,1,1,1,1,1))
 
-#View(rf.model$variable.importance)
+View(rf.multiclasses.model$variable.importance)
 
 rf.multiclasses.pred=predict(rf.multiclasses.model, data = data.classification.train[-id.sub.train,])
 
 eval<-caret::confusionMatrix(data=rf.multiclasses.pred$predictions, reference=as.factor(data.classification.train$label_of_class[-id.sub.train]), mode="everything")
 eval
-
+View(eval$byClass)
 ```
 
 ##learn class likelihood over  training set
@@ -274,7 +293,7 @@ rf.multiclasses.label.prediction=predict(rf.multiclasses.model, data = data.clas
 
 #Learn hierarchical random forest
 
-##learn Random Forest on subset of training set
+##learn Random Forest on 2/3 of training set
 
 ```{r}
 seed=123
@@ -285,7 +304,9 @@ data.classification.train$label_of_class=as.factor(binary.label[id.train])
 id.sub.train <- sample(nrow(data.classification.train), 2/3 * nrow(data.classification.train))
 
 
-rf.bin.model=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train[id.sub.train,], num.trees=20000, num.threads=6, classification=T)
+rf.bin.model=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train[id.sub.train,], num.trees=40000, num.threads=6, classification=T, importance = "impurity")
+
+View(rf.bin.model$variable.importance, title = "impurity over binary classes")
 
 #get exemplars from the "is.consultation.label" class
 id.sub.is.consultation=data.classification.train$label_of_class[id.sub.train]=="is.consultation.label"
@@ -300,11 +321,13 @@ data.classification.train.consul=data.classification.train[id.sub.train,][id.sub
 
 
 #learn model of multiclassification only on consultation exemplars
-rf.multi.model.consul=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train.consul, num.trees=20000, num.threads=6, classification=T)
+rf.multi.model.consul=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train.consul, num.trees=30000, num.threads=6, classification=T, importance = "impurity")
+
+View(rf.multi.model.consul$variable.importance, title = "impurity over multi classes")
 
 ```
 
-##Predict with hierarchical random forest
+##Predict with hierarchical random forest on 1/3 of training set
 ```{r}
 rf.bin.pred=predict(rf.bin.model, data = data.classification.train[-id.sub.train,])
 
@@ -320,15 +343,54 @@ my.reference[binary.label[id.train][-id.sub.train]=="is.not.consultation.label"]
 eval<-caret::confusionMatrix(data=as.factor(rf.joint.pred), reference=as.factor(my.reference), mode="everything")
 eval
 View(eval$byClass)
-write.csv(eval$byClass, file = "evalRFhierarchic.csv", row.names = T, col.names = T, fileEncoding = "utf8")
+#write.csv(eval$byClass, file = "evalRFhierarchic.csv", row.names = T, col.names = T, fileEncoding = "utf8")
 ```
 
 
-#save class prediction
+##Learn over all training set 
 ```{r}
-prediction.on.test.set=cbind(mood.industry.data[id.train==F, ], rf.binary.label.prediction$predictions, rf.multiclasses.label.prediction$predictions)
-saveRDS(prediction.on.test.set, "prediction.on.test.set.rds")
-write.csv(prediction.on.test.set, file="prediction.on.test.set.csv", col.names = T, fileEncoding = "utf8")
+seed=123
+#set label to binary class
+data.classification.train$label_of_class=as.factor(binary.label[id.train])
+
+
+rf.bin.model=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train, num.trees=50000, num.threads=6, classification=T, importance = "impurity", probability=T)
+
+View(rf.bin.model$variable.importance, title = "impurity over binary classes")
+
+#get exemplars from the "is.consultation.label" class
+id.sub.is.consultation=data.classification.train$label_of_class=="is.consultation.label"
+#set label to multi class
+data.classification.train$label_of_class=as.factor(multi.class.label[id.train])
+
+data.classification.train.consul=data.classification.train[id.sub.is.consultation,]%>%droplevels(.)
+
+#learn model of multiclassification only on consultation exemplars
+rf.multi.model.consul=ranger::ranger(dependent.variable.name = "label_of_class", data=data.classification.train.consul, num.trees=50000, num.threads=6, classification=T, importance = "impurity", probability = T)
+
+View(rf.multi.model.consul$variable.importance, title = "impurity over multi classes")
+```
+
+##Predict with hierarchical random forest on test set
+```{r}
+rf.bin.pred=predict(rf.bin.model, data = data.classification.test[,(-4)])
+
+rf.multi.pred=predict(rf.multi.model.consul, data=data.classification.test[rf.bin.pred$predictions[,1]>.5, (-4)])
+
+#join predictions
+rf.joint.pred=rf.bin.pred$predictions
+multi.class.pred=rep(NA, times=nrow(rf.joint.pred))
+multi.class.pred=cbind(multi.class.pred,multi.class.pred,multi.class.pred) %>%set_colnames(., colnames(rf.multi.pred$predictions))
+multi.class.pred[rf.bin.pred$predictions[,1]>.5,]=rf.multi.pred$predictions
+rf.joint.pred=cbind(rf.joint.pred, multi.class.pred)
+
+```
+
+##save class prediction
+```{r}
+prediction.on.test.set=cbind(mood.industry.data[id.train==F, ], (rf.joint.pred))
+saveRDS(prediction.on.test.set, "hierar.RF.prediction.on.test.set.rds")
+write.csv(prediction.on.test.set, file="hierar.RF.prediction.on.test.set.csv", col.names = T, fileEncoding = "utf8")
 ```
 
 

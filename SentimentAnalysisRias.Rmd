@@ -1,0 +1,80 @@
+---
+title: "SentimentAnalysisRias"
+author: "Jean-Francois Chartier"
+date: "6 mars 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#read data
+```{r}
+mood.industry.data=readRDS("mood.industry.data.rds")
+#wordfrequency.matrix.regcan=readRDS("wordfrequency.matrix.regcan.rds")
+#reduced.svd.regcan.doc=readRDS("reduced.svd.regcan.doc.rds")
+
+```
+
+
+
+#cleaning corpus
+```{r}
+#library(stringr)
+# tokenisation selon quanteda
+preprocesCorpus=stringr::str_replace_all(mood.industry.data$text,"[\r\n]" , "")
+#remove all non graphical caracther
+preprocesCorpus=stringr::str_replace_all(preprocesCorpus,"[^[:graph:]]", " ")
+#remove whitespace
+preprocesCorpus=stringr::str_squish(preprocesCorpus)
+```
+
+#Tokinization and word filtering
+```{r}
+
+preprocesCorpus=quanteda::tokens(x=preprocesCorpus,what="word", remove_punct = TRUE, remove_numbers = TRUE, remove_separators = TRUE,remove_hyphens = TRUE, remove_symbols=TRUE, remove_url = TRUE)
+
+preprocesCorpus=quanteda::tokens_tolower(preprocesCorpus)
+
+#lemmatization
+preprocesCorpus=sapply(preprocesCorpus, FUN = function(seg)  paste0(textstem::lemmatize_words(seg), collapse = " "))
+preprocesCorpus=quanteda::tokens(preprocesCorpus)
+
+#concat multi-word expression from the sentiment dictionnary
+preprocesCorpus <- tokens_compound(preprocesCorpus, data_dictionary_LSD2015)
+
+print(c("corpus size after preprocessing : " , length(paste(unlist(preprocesCorpus)))))
+
+print(c("vocabulary size after preprocessing : ", length(unique(paste(unlist(preprocesCorpus))) )))
+
+
+```
+
+```{r}
+normVector <- function(x) 
+{
+  if(sum(x)==0)
+    return (x)
+  else 
+    return (x / sqrt(sum(x^2)))
+  
+}
+```
+
+
+#vectorize with sentiment dictionnary
+```{r}
+sentiment.regcan.matrix=dfm(preprocesCorpus, dictionary = data_dictionary_LSD2015) %>% set_colnames(., paste0("sentiment.",colnames(.)))
+
+
+#unit vector norm
+sentiment.regcan.matrix <- (t(apply(sentiment.regcan.matrix, MARGIN = 1, FUN = function(x) normVector(x))))
+```
+
+#save document*word frequency matrix 
+```{r}
+saveRDS(sentiment.regcan.matrix, "sentiment.regcan.matrix.rds")
+```
