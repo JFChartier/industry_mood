@@ -390,10 +390,14 @@ rf.joint.pred=cbind(rf.joint.pred, multi.class.pred)
 ```{r}
 prediction.on.test.set=cbind(mood.industry.data[id.train==F, ], (rf.joint.pred))
 saveRDS(prediction.on.test.set, "hierar.RF.prediction.on.test.set.rds")
-write.csv(prediction.on.test.set, file="hierar.RF.prediction.on.test.set.csv", col.names = T, fileEncoding = "utf8")
+write.table(prediction.on.test.set, file="hierar.RF.prediction.on.test.set.csv", col.names = T, fileEncoding = "utf8", quote=T, sep=",")
 ```
 
 
+```{r}
+prediction.on.test.set=readRDS("hierar.RF.prediction.on.test.set.rds")
+write.csv2(prediction.on.test.set, file="hierar.RF.prediction.on.test.set.csv", col.names = T, fileEncoding = "utf8", quote=T, sep=";")
+```
 
 
 
