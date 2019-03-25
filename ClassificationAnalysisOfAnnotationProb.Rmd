@@ -1,0 +1,280 @@
+---
+title: "ClassificationAnalysisOfAnnotationProb"
+author: "Jean-Francois Chartier"
+date: "25 mars 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#install packages
+```{r}
+
+if ("magrittr" %in% installed.packages()==FALSE){
+  install.packages('quanteda',dependencies = TRUE)
+}
+library(magrittr)
+
+if ("caret" %in% installed.packages()==FALSE){
+  install.packages('caret',dependencies = TRUE)
+}
+library(caret)
+if ("rpart" %in% installed.packages()==FALSE){
+  install.packages('rpart',dependencies = TRUE)
+}
+library(rpart)
+
+if ("quanteda" %in% installed.packages()==FALSE){
+  install.packages('quanteda',dependencies = TRUE)
+}
+library(quanteda)
+
+```
+
+
+```{r}
+#function to create a unit normed vector
+normVector <- function(x) 
+{
+  if(sum(x)==0)
+    return (x)
+  else 
+    return (x / sqrt(sum(x^2)))
+  
+}
+#function to norm many vectors
+normRowVectors<-function(m){
+  t(apply(m, MARGIN = 1, FUN = function(x) normVector(x)))
+}
+```
+
+
+#read data
+```{r}
+mood.industry.data=readRDS("mood.industry.data.with.prob.rds")
+wordfrequency.matrix.regcan=readRDS("wordfrequency.matrix.regcan.rds")
+#reduced.svd.regcan.doc=readRDS("reduced.svd.regcan.doc.rds")
+
+#svd.of.regcan.from.irba = readRDS("svd.of.regcan.from.irba.150.rds")
+
+#reduced.svd.regcan.doc=  as.matrix(svd.of.regcan.from.irba$u %*% solve(diag((svd.of.regcan.from.irba$d)))) #%>% normRowVectors()
+#colnames(reduced.svd.regcan.doc)=svd.of.regcan.from.irba$feature.names
+
+ngramfrequency.matrix.regcan=readRDS("ngramfrequency.matrix.regcan.rds")
+
+reduced.matrix.context.rias=readRDS("reduced.matrix.context.rias.rds")
+
+sentiment.regcan.matrix=readRDS("sentiment.regcan.matrix.rds")
+```
+
+#read all latent models
+```{r}
+n.latents=c(50, 100, 150, 200, 300, 400, 500, 800)
+
+latent.models=lapply(n.latents, FUN = function(k){
+  svd.of.regcan.from.irba = readRDS(paste0("svd.of.regcan.from.irba.", k, ".rds"))
+  
+  reduced.svd.regcan.doc=  as.matrix(svd.of.regcan.from.irba$u %*% solve(diag((svd.of.regcan.from.irba$d)))) #%>% normRowVectors()
+  colnames(reduced.svd.regcan.doc)=paste0(k,".",svd.of.regcan.from.irba$feature.names)
+  reduced.svd.regcan.doc
+  })
+
+```
+
+
+#get training id
+```{r}
+
+id.train=mood.industry.data$training.set==T
+```
+
+#Combine features
+##add meta data
+```{r}
+data.classification=mood.industry.data[,c(3:5,8, 10:13)]
+```
+
+##add word-matrix frequency
+```{r}
+data.classification=cbind(data.classification, as.matrix(wordfrequency.matrix.regcan)%>%set_colnames(., wordfrequency.matrix.regcan@Dimnames$features))
+```
+
+##add n-gram
+```{r}
+data.classification=cbind(data.classification, as.matrix(ngramfrequency.matrix.regcan)%>%set_colnames(., ngramfrequency.matrix.regcan@Dimnames$features))
+```
+
+##add sentiment features
+```{r}
+data.classification=cbind(data.classification, sentiment.regcan.matrix)
+```
+
+##add all latent models
+```{r}
+all.latent.models=do.call("cbind", latent.models)
+data.classification=cbind(data.classification, all.latent.models)
+```
+
+##add global.rias.latent
+```{r}
+#add global.rias.latent
+data.classification=cbind(data.classification, reduced.matrix.context.rias)
+
+```
+
+#prepare data for ml
+```{r}
+
+#change NA in sponsor
+#data.classification=data.classification.train
+i=data.classification$sponsor.feature%>%is.na(.)
+data.classification$sponsor.feature=as.character(data.classification$sponsor.feature)
+data.classification$sponsor.feature[i]="unknown.sponsor"
+data.classification$sponsor.feature=as.factor(data.classification$sponsor.feature)
+
+#extract train and test sets
+data.classification.train=data.classification[id.train, ]
+data.classification.test=data.classification[id.train==F, ]
+
+```
+
+#Classification based on threshold selection
+##subset of id train
+```{r}
+seed=123
+id.sub.train <- sample(nrow(data.classification.train), 2/3 * nrow(data.classification.train))
+```
+
+##is.not.consultation annotation
+###set features
+```{r}
+data.classification.train.not.consultation = data.classification.train[,-c(4,6:8)]
+```
+
+###set threshold for classifiction
+```{r}
+my.threshold=.109 #at least greater than 0
+data.classification.train.not.consultation$is.not.consultation.prob=(data.classification.train.not.consultation$is.not.consultation.prob>my.threshold) %>%as.factor(.)
+```
+
+###train on sub training set
+```{r}
+
+rf.notConsult.model=ranger::ranger(dependent.variable.name = "is.not.consultation.prob", data=data.classification.train.not.consultation[id.sub.train,], num.trees=20000, num.threads=6, classification=T, importance = "impurity", probability = T)
+
+#View(rf.notConsult.model$variable.importance, title = "impurity over is.not.consultation")
+
+```
+
+###Prediction on remaining 1/3 of training set
+```{r}
+
+rf.notConsul.pred=predict.ranger(rf.notConsult.model,data =  data.classification.train.not.consultation[-id.sub.train,])
+
+observed=data.classification.train.not.consultation$is.not.consultation.prob[-id.sub.train]
+
+predicted=rf.notConsul.pred$predictions
+
+```
+
+###ROC curve evaluation
+use roc curve analysis to identify the best threshold for classification prediction
+```{r}
+#library(pROC)
+rocCurve.notConsul <- pROC::roc(response = observed,
+                                predictor = rf.institution.pred$predictions[,"TRUE"],
+                                levels = (levels(observed)))
+## This function assumes that the second
+## class is the event of interest, so we
+## reverse the labels.
+
+
+best.threshold=(rocCurve.notConsul$sensitivities+rocCurve.notConsul$specificities) %>%which.max(.) %>%rocCurve.notConsul$thresholds[.]
+
+pROC::auc(rocCurve.notConsul)
+pROC::ci(rocCurve.notConsul)
+plot.roc(rocCurve.notConsul, legacy.axes = TRUE, print.thres="best", print.auc=T, auc.polygon=F, ci=F)
+```
+
+###evaluation on confusion matrix
+```{r}
+eval.notConsul<-caret::confusionMatrix(data=(predicted[,"TRUE"]>best.threshold) %>%as.factor(.), reference=observed, mode="everything", positive="TRUE")
+
+huxtable::as_huxtable(eval.notConsul$overall,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
+
+huxtable::as_huxtable(eval.notConsul$byClass,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
+```
+
+
+##institution annotation
+###set features
+```{r}
+data.classification.train.institution = data.classification.train[,-c(4:6,8)]
+
+data.classification.train.institution$targeted.class=data.classification.train.institution$statement.institution.prob
+data.classification.train.institution$statement.institution.prob=NULL
+
+```
+
+###set threshold for classifiction
+```{r}
+my.threshold=.109 #at least greater than 0
+data.classification.train.institution$targeted.class=(data.classification.train.institution$targeted.class>my.threshold) %>%as.factor(.)
+```
+
+###train on sub training set
+```{r}
+
+rf.institution.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.train.institution[id.sub.train,], num.trees=20000, num.threads=6, classification=T, importance = "impurity", probability = T)
+
+#View(rf.notConsult.model$variable.importance, title = "impurity over is.not.consultation")
+
+```
+
+###Prediction on remaining 1/3 of training set
+```{r}
+
+rf.institution.pred=predict(rf.institution.model, data =  data.classification.train.institution[-id.sub.train,])
+
+observed=data.classification.train.institution$targeted.class[-id.sub.train]
+
+predicted=rf.institution.pred$predictions
+
+```
+
+###ROC curve evaluation
+use roc curve analysis to identify the best threshold for classification prediction
+```{r}
+#library(pROC)
+rocCurve.institution <- pROC::roc(response = observed,
+                                predictor = rf.institution.pred$predictions[,"TRUE"],
+                                levels = (levels(observed)))
+## This function assumes that the second
+## class is the event of interest, so we
+## reverse the labels.
+
+
+best.threshold=(rocCurve.institution$sensitivities+rocCurve.institution$specificities) %>%which.max(.) %>%rocCurve.institution$thresholds[.]
+
+pROC::auc(rocCurve.institution)
+pROC::ci(rocCurve.institution)
+plot.roc(rocCurve.institution, legacy.axes = TRUE, print.thres="best", print.auc=T, auc.polygon=F, ci=F)
+```
+
+###evaluation on confusion matrix
+```{r}
+eval<-caret::confusionMatrix(data=(predicted[,"TRUE"]>best.threshold) %>%as.factor(.), reference=observed, mode="everything", positive="TRUE")
+
+huxtable::as_huxtable(eval$overall,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
+
+huxtable::as_huxtable(eval$byClass,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
+```
+
+
+
+

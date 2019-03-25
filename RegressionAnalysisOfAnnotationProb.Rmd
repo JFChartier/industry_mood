@@ -142,79 +142,131 @@ data.classification.test=data.classification[id.train==F, ]
 
 ```
 
-#Regression on is.not.consultation 
-##train on sub training set
+#Regression Prediction Analysis
+##is.not.consultation annotation 
 ```{r}
-seed=123
-data.classification.train.not.consultation = data.classification.train[,-c(4,6:8)]
 #subset of id train
-id.sub.train <- sample(nrow(data.classification.train.not.consultation), 2/3 * nrow(data.classification.train.not.consultation))
+seed=123
+id.sub.train <- sample(nrow(data.classification.train), 2/3 * nrow(data.classification.train))
+```
 
+###train on sub training set
+```{r}
+data.classification.train.not.consultation = data.classification.train[,-c(4,6:8)]
 
-rf.bin.model=ranger::ranger(dependent.variable.name = "is.not.consultation.prob", data=data.classification.train.not.consultation[id.sub.train,], num.trees=40000, num.threads=6, classification=F, importance = "impurity")
+rf.bin.model=ranger::ranger(dependent.variable.name = "is.not.consultation.prob", data=data.classification.train.not.consultation[id.sub.train,], num.trees=20000, num.threads=6, classification=F, importance = "impurity")
 
-View(rf.bin.model$variable.importance, title = "impurity over is.not.consultation class")
-
-
+View(rf.bin.model$variable.importance, title = "impurity over is.not.consultation")
 
 ```
 
-##Predict regression on 1/3 of training set
+###Predict regression on 1/3 of training set
 ```{r}
 rf.bin.pred=predict(rf.bin.model, data = data.classification.train.not.consultation[-id.sub.train,])
 
-cor(data.classification.train.not.consultation$is.not.consultation.prob[-id.sub.train], rf.bin.pred$predictions)
+observed=data.classification.train.not.consultation$is.not.consultation.prob[-id.sub.train]
+predicted=rf.bin.pred$predictions
 
-plot(data.classification.train.not.consultation$is.not.consultation.prob[-id.sub.train], rf.bin.pred$predictions)
+cor=cor(observed, predicted)
+rmse=RMSE(observed, predicted)
+evaluations=data.frame(class="is.not.consultation", correlation=cor, rmse=rmse)
+
+axisRange <- extendrange(c(observed, predicted))
+plot(observed, predicted, xlab = "observations", ylab = "predictions", main = "Observations and predictions for no statement likelihood")
+abline(a = 0, b = 1,  col  = "darkgrey", lty = 2)
 
 ```
 
-#Regression on institution label 
-##train on sub training set
+##institution annotation 
+###train on sub training set
 ```{r}
-seed=123
-data.classification.train.institution = data.classification.train[,-c(4:6,8)]
-#subset of id train
-id.sub.train <- sample(nrow(data.classification.train.institution), 2/3 * nrow(data.classification.train.institution))
 
+data.classification.train.institution = data.classification.train[,-c(4:6,8)]
 
 rf.institution.model=ranger::ranger(dependent.variable.name = "statement.institution.prob", data=data.classification.train.institution[id.sub.train,], num.trees=20000, num.threads=6, classification=F, importance = "impurity")
 
-View(rf.institution.model$variable.importance, title = "impurity over is.not.consultation class")
+View(rf.institution.model$variable.importance, title = "impurity over statement.institution.prob")
 
 ```
 
-##Predict regression on 1/3 of training set
+###Predict regression on 1/3 of training set
 ```{r}
 rf.institution.pred=predict(rf.institution.model, data = data.classification.train.institution[-id.sub.train,])
 
-cor(data.classification.train.institution$statement.institution.prob[-id.sub.train], rf.institution.pred$predictions)
+observed=data.classification.train.institution$statement.institution.prob[-id.sub.train]
+predicted=rf.institution.pred$predictions
 
-plot(data.classification.train.institution$statement.institution.prob[-id.sub.train], rf.institution.pred$predictions, xlab = "observations", ylab = "predictions")
+cor=cor(observed, predicted)
+rmse=RMSE(observed, predicted)
+evaluations=rbind(evaluations, data.frame(class="institution", correlation=cor, rmse=rmse))
+
+axisRange <- extendrange(c(observed, predicted))
+plot(observed, predicted, xlab = "observations", ylab = "predictions", main = "Observations and predictions for institution statement likelihood")
+abline(a = 0, b = 1,  col  = "darkgrey", lty = 2)
 
 ```
 
-#Regression on advocacy 
-##train on sub training set
+##advocacy annotation 
+###train on sub training set
 ```{r}
-seed=123
-data.classification.train.advocacy = data.classification.train[,-c(4:5,7:8)]
-#subset of id train
-id.sub.train <- sample(nrow(data.classification.train.advocacy), 2/3 * nrow(data.classification.train.advocacy))
 
+data.classification.train.advocacy = data.classification.train[,-c(4:5,7:8)]
 
 rf.advocacy.model=ranger::ranger(dependent.variable.name = "statement.advocacy.prob", data=data.classification.train.advocacy[id.sub.train,], num.trees=20000, num.threads=6, classification=F, importance = "impurity")
 
-View(rf.institution.model$variable.importance, title = "impurity over is.not.consultation class")
+View(rf.advocacy.model$variable.importance, title = "impurity over statement.advocacy.prob")
 
 ```
 
-##Predict regression on 1/3 of training set
+###Predict regression on 1/3 of training set
 ```{r}
 rf.advocacy.pred=predict(rf.advocacy.model, data = data.classification.train.advocacy[-id.sub.train,])
 
-cor(data.classification.train.advocacy$statement.advocacy.prob[-id.sub.train], rf.advocacy.pred$predictions)
+observed=data.classification.train.advocacy$statement.advocacy.prob[-id.sub.train]
+predicted=rf.advocacy.pred$predictions
 
-plot(data.classification.train.advocacy$statement.advocacy.prob[-id.sub.train], rf.advocacy.pred$predictions, xlab = "observations", ylab = "predictions")
+cor=cor(observed, predicted)
+rmse=RMSE(observed, predicted)
+evaluations=rbind(evaluations, data.frame(class="advocacy", correlation=cor, rmse=rmse))
+
+axisRange <- extendrange(c(observed, predicted))
+plot(observed, predicted, xlab = "observations", ylab = "predictions", main = "Observations and predictions for advocacy statement likelihood")
+abline(a = 0, b = 1,  col  = "darkgrey", lty = 2)
 
 ```
+##industry annotation 
+###train on sub training set
+```{r}
+
+data.classification.train.industry = data.classification.train[,-c(4:7)]
+
+rf.industry.model=ranger::ranger(dependent.variable.name = "statement.industry.prob", data=data.classification.train.industry[id.sub.train,], num.trees=20000, num.threads=6, classification=F, importance = "impurity")
+
+View(rf.industry.model$variable.importance, title = "impurity over statement.industry.prob")
+
+```
+
+###Predict regression on 1/3 of training set
+```{r}
+rf.industry.pred=predict(rf.industry.model, data = data.classification.train.industry[-id.sub.train,])
+
+observed=data.classification.train.industry$statement.industry.prob[-id.sub.train]
+predicted=rf.industry.pred$predictions
+
+cor=cor(observed, predicted)
+rmse=RMSE(observed, predicted)
+evaluations=rbind(evaluations, data.frame(class="industry", correlation=cor, rmse=rmse))
+
+axisRange <- extendrange(c(observed, predicted))
+plot(observed, predicted, xlab = "observations", ylab = "predictions", main = "Observations and predictions for industry statement likelihood")
+abline(a = 0, b = 1,  col  = "darkgrey", lty = 2)
+```
+
+##Plot Evalutions
+```{r}
+huxtable::as_huxtable(evaluations,add_colnames=T)%>%huxtable::theme_basic(.)
+
+```
+
+
+
