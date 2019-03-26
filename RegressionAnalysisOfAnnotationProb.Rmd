@@ -2,13 +2,18 @@
 title: "RegressionAnalysisOfAnnotationProb"
 author: "Jean-Francois Chartier"
 date: "22 mars 2019"
-output: html_document
+output: 
+  html_document:
+    fig_height: 12
+    fig_width: 9
+    number_sections: yes
+    toc: yes
 editor_options: 
   chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, cache.lazy = FALSE, cache=T, warning = FALSE, message = FALSE)
 ```
 
 #install packages
@@ -57,12 +62,6 @@ normRowVectors<-function(m){
 ```{r}
 mood.industry.data=readRDS("mood.industry.data.with.prob.rds")
 wordfrequency.matrix.regcan=readRDS("wordfrequency.matrix.regcan.rds")
-#reduced.svd.regcan.doc=readRDS("reduced.svd.regcan.doc.rds")
-
-#svd.of.regcan.from.irba = readRDS("svd.of.regcan.from.irba.150.rds")
-
-#reduced.svd.regcan.doc=  as.matrix(svd.of.regcan.from.irba$u %*% solve(diag((svd.of.regcan.from.irba$d)))) #%>% normRowVectors()
-#colnames(reduced.svd.regcan.doc)=svd.of.regcan.from.irba$feature.names
 
 ngramfrequency.matrix.regcan=readRDS("ngramfrequency.matrix.regcan.rds")
 
@@ -156,7 +155,8 @@ data.classification.train.not.consultation = data.classification.train[,-c(4,6:8
 
 rf.bin.model=ranger::ranger(dependent.variable.name = "is.not.consultation.prob", data=data.classification.train.not.consultation[id.sub.train,], num.trees=20000, num.threads=6, classification=F, importance = "impurity")
 
-View(rf.bin.model$variable.importance, title = "impurity over is.not.consultation")
+#View(rf.bin.model$variable.importance, title = "impurity over is.not.consultation")
+huxtable::as_huxtable(sort(rf.bin.model$variable.importance, decreasing = T)%>%head(., n = 20), add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
 
 ```
 
@@ -174,6 +174,7 @@ evaluations=data.frame(class="is.not.consultation", correlation=cor, rmse=rmse)
 axisRange <- extendrange(c(observed, predicted))
 plot(observed, predicted, xlab = "observations", ylab = "predictions", main = "Observations and predictions for no statement likelihood")
 abline(a = 0, b = 1,  col  = "darkgrey", lty = 2)
+text(.2, .8, paste0("r=", round(cor, 2)))
 
 ```
 
@@ -185,8 +186,9 @@ data.classification.train.institution = data.classification.train[,-c(4:6,8)]
 
 rf.institution.model=ranger::ranger(dependent.variable.name = "statement.institution.prob", data=data.classification.train.institution[id.sub.train,], num.trees=20000, num.threads=6, classification=F, importance = "impurity")
 
-View(rf.institution.model$variable.importance, title = "impurity over statement.institution.prob")
+#View(rf.institution.model$variable.importance, title = "impurity over statement.institution.prob")
 
+huxtable::as_huxtable(sort(rf.institution.model$variable.importance, decreasing = T)%>%head(., n = 20), add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
 ```
 
 ###Predict regression on 1/3 of training set
@@ -203,6 +205,7 @@ evaluations=rbind(evaluations, data.frame(class="institution", correlation=cor, 
 axisRange <- extendrange(c(observed, predicted))
 plot(observed, predicted, xlab = "observations", ylab = "predictions", main = "Observations and predictions for institution statement likelihood")
 abline(a = 0, b = 1,  col  = "darkgrey", lty = 2)
+text(.2, .8, paste0("r=", round(cor, 2)))
 
 ```
 
@@ -214,8 +217,9 @@ data.classification.train.advocacy = data.classification.train[,-c(4:5,7:8)]
 
 rf.advocacy.model=ranger::ranger(dependent.variable.name = "statement.advocacy.prob", data=data.classification.train.advocacy[id.sub.train,], num.trees=20000, num.threads=6, classification=F, importance = "impurity")
 
-View(rf.advocacy.model$variable.importance, title = "impurity over statement.advocacy.prob")
+#View(rf.advocacy.model$variable.importance, title = "impurity over statement.advocacy.prob")
 
+huxtable::as_huxtable(sort(rf.advocacy.model$variable.importance, decreasing = T)%>%head(., n = 20), add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
 ```
 
 ###Predict regression on 1/3 of training set
@@ -232,6 +236,7 @@ evaluations=rbind(evaluations, data.frame(class="advocacy", correlation=cor, rms
 axisRange <- extendrange(c(observed, predicted))
 plot(observed, predicted, xlab = "observations", ylab = "predictions", main = "Observations and predictions for advocacy statement likelihood")
 abline(a = 0, b = 1,  col  = "darkgrey", lty = 2)
+text(.2, .8, paste0("r=", round(cor, 2)))
 
 ```
 ##industry annotation 
@@ -242,8 +247,9 @@ data.classification.train.industry = data.classification.train[,-c(4:7)]
 
 rf.industry.model=ranger::ranger(dependent.variable.name = "statement.industry.prob", data=data.classification.train.industry[id.sub.train,], num.trees=20000, num.threads=6, classification=F, importance = "impurity")
 
-View(rf.industry.model$variable.importance, title = "impurity over statement.industry.prob")
+#View(rf.industry.model$variable.importance, title = "impurity over statement.industry.prob")
 
+huxtable::as_huxtable(sort(rf.industry.model$variable.importance, decreasing = T)%>%head(., n = 20), add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
 ```
 
 ###Predict regression on 1/3 of training set
@@ -260,9 +266,11 @@ evaluations=rbind(evaluations, data.frame(class="industry", correlation=cor, rms
 axisRange <- extendrange(c(observed, predicted))
 plot(observed, predicted, xlab = "observations", ylab = "predictions", main = "Observations and predictions for industry statement likelihood")
 abline(a = 0, b = 1,  col  = "darkgrey", lty = 2)
+text(.2, .8, paste0("r=", round(cor, 2)))
+
 ```
 
-##Plot Evalutions
+##Plot global evalutions of annotations
 ```{r}
 huxtable::as_huxtable(evaluations,add_colnames=T)%>%huxtable::theme_basic(.)
 
