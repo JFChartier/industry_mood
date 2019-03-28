@@ -238,6 +238,36 @@ huxtable::as_huxtable(eval.of.annotation$byClass,add_colnames=T, add_rownames=T)
 evaluation.global[1,]=c("is.not.consultation", eval.of.annotation$byClass["F1"], eval.of.annotation$byClass["Recall"], eval.of.annotation$byClass["Precision"], pROC::auc(rocCurve.of.annot), eval.of.annotation$overall["Kappa"], eval.of.annotation$overall["Accuracy"])
 ```
 
+##is.not.consultation without prob
+###train on sub training set
+```{r}
+
+rf.notConsult.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.train.target[id.sub.train,], num.trees=20000, num.threads=6, classification=T, importance = "impurity", probability = F)
+
+#View(rf.notConsult.model$variable.importance, title = "impurity over is.not.consultation")
+
+```
+
+###Prediction on remaining 1/3 of training set
+```{r}
+
+rf.notConsul.pred=predict(rf.notConsult.model,data =  data.classification.train.target[-id.sub.train,])
+
+observed=data.classification.train.target$targeted.class[-id.sub.train]
+
+predicted=rf.notConsul.pred$predictions
+
+```
+
+###evaluation on confusion matrix
+```{r}
+eval.of.annotation<-caret::confusionMatrix(data=predicted, reference=observed, mode="everything", positive="TRUE")
+
+huxtable::as_huxtable(eval.of.annotation$overall,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
+
+huxtable::as_huxtable(eval.of.annotation$byClass,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
+
+```
 
 ##institution annotation
 ###set features
