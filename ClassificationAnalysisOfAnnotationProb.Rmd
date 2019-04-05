@@ -190,7 +190,7 @@ data.classification.train.target$targeted.class=(data.classification.train.targe
 ###train on sub training set
 ```{r}
 
-rf.notConsult.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.train.target[id.sub.train,], num.trees=20000, num.threads=6, classification=T, importance = "impurity", probability = T)
+rf.notConsult.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.train.target[id.sub.train,], num.trees=40000, num.threads=6, classification=T, probability = T)
 
 #View(rf.notConsult.model$variable.importance, title = "impurity over is.not.consultation")
 
@@ -218,6 +218,7 @@ rocCurve.of.annot <- pROC::roc(response = observed,
 ## class is the event of interest, so we
 ## reverse the labels.
 
+saveRDS(rocCurve.of.annot, "rocCurve.NoConsultation.rds")
 
 best.threshold=(rocCurve.of.annot$sensitivities+rocCurve.of.annot$specificities) %>%which.max(.) %>%rocCurve.of.annot$thresholds[.]
 
@@ -288,7 +289,7 @@ data.classification.train.target$targeted.class=(data.classification.train.targe
 ###train on sub training set
 ```{r}
 
-rf.institution.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.train.target[id.sub.train,], num.trees=20000, num.threads=6, classification=T, importance = "impurity", probability = T)
+rf.institution.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.train.target[id.sub.train,], num.trees=40000, num.threads=6, classification=T, probability = T)
 
 #View(rf.notConsult.model$variable.importance, title = "impurity over is.not.consultation")
 
@@ -316,6 +317,7 @@ rocCurve.of.annot <- pROC::roc(response = observed,
 ## class is the event of interest, so we
 ## reverse the labels.
 
+saveRDS(rocCurve.of.annot, "rocCurve.institution.rds")
 
 best.threshold=(rocCurve.of.annot$sensitivities+rocCurve.of.annot$specificities) %>%which.max(.) %>%rocCurve.of.annot$thresholds[.]
 
@@ -354,9 +356,8 @@ data.classification.train.target$targeted.class=(data.classification.train.targe
 ###train on sub training set
 ```{r}
 
-rf.advocacy.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.train.target[id.sub.train,], num.trees=20000, num.threads=6, classification=T, importance = "impurity", probability = T)
+rf.advocacy.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.train.target[id.sub.train,], num.trees=40000, num.threads=6, classification=T, probability = T)
 
-#View(rf.notConsult.model$variable.importance, title = "impurity over is.not.consultation")
 
 ```
 
@@ -382,6 +383,7 @@ rocCurve.of.annot <- pROC::roc(response = observed,
 ## class is the event of interest, so we
 ## reverse the labels.
 
+saveRDS(rocCurve.of.annot, "rocCurve.advocacy.rds")
 
 best.threshold=(rocCurve.of.annot$sensitivities+rocCurve.of.annot$specificities) %>%which.max(.) %>%rocCurve.of.annot$thresholds[.]
 
@@ -420,7 +422,7 @@ data.classification.train.target$targeted.class=(data.classification.train.targe
 ###train on sub training set
 ```{r}
 
-rf.industry.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.train.target[id.sub.train,], num.trees=20000, num.threads=6, classification=T, importance = "impurity", probability = T)
+rf.industry.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.train.target[id.sub.train,], num.trees=40000, num.threads=6, classification=T, probability = T)
 
 #View(rf.notConsult.model$variable.importance, title = "impurity over is.not.consultation")
 
@@ -449,6 +451,7 @@ rocCurve.of.annot <- pROC::roc(response = observed,
 ## class is the event of interest, so we
 ## reverse the labels.
 
+saveRDS(rocCurve.of.annot, "rocCurve.industry.rds")
 
 best.threshold=(rocCurve.of.annot$sensitivities+rocCurve.of.annot$specificities) %>%which.max(.) %>%rocCurve.of.annot$thresholds[.]
 
@@ -475,3 +478,80 @@ evaluation.global[4,]=c("industry", eval.of.annotation$byClass["F1"], eval.of.an
 huxtable::as_huxtable(evaluation.global, add_colnames=T)%>%huxtable::theme_basic(.)
 
 ```
+
+#Prediction on test set
+
+
+##is.not.consultation annotation
+###set features
+```{r}
+data.classification.target = data.classification[,-c(4,6:8)]
+
+data.classification.target$targeted.class=data.classification.target$is.not.consultation.prob
+data.classification.target$is.not.consultation.prob=NULL
+
+```
+
+###set threshold for classifiction
+```{r}
+my.threshold=0.1 #at least greater than 0
+data.classification.target$targeted.class=(data.classification.target$targeted.class>my.threshold) %>%as.factor(.)
+```
+
+###train on all training set
+```{r}
+
+rf.notConsult.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.target[id.train,], num.trees=40000, num.threads=6, classification=T, probability = T)
+
+```
+
+###Prediction on train and test sets
+```{r}
+
+rf.notConsul.pred=predict(rf.notConsult.model, data =  data.classification.target[, names(data.classification.target)!="targeted.class"])
+
+pred.of.noConsult.prob=rf.notConsul.pred$predictions[,"TRUE"]
+
+```
+
+##industry annotation
+###set features
+```{r}
+data.classification.target = data.classification[,-c(4:7)]
+
+data.classification.target$targeted.class=data.classification.target$statement.industry.prob
+data.classification.target$statement.industry.prob=NULL
+
+```
+
+###set threshold for classification
+```{r}
+my.threshold=0.1 #at least greater than 0
+data.classification.target$targeted.class=(data.classification.target$targeted.class>my.threshold) %>%as.factor(.)
+```
+
+###train on training set
+```{r}
+
+rf.industry.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.target[id.train,], num.trees=40000, num.threads=6, classification=T, probability = T)
+
+```
+
+###Prediction on train and test set
+```{r}
+
+rf.industry.pred=predict(rf.industry.model, data =  data.classification.target[,names(data.classification.target)!="targeted.class"])
+
+pred.of.industry.prob=rf.industry.pred$predictions[,"TRUE"]
+
+```
+
+
+##Save results
+```{r}
+mood.industry.data.with.pred.on.testset=cbind(mood.industry.data, pred.of.noConsult.prob, pred.of.industry.prob)
+saveRDS(mood.industry.data.with.pred.on.testset, "mood.industry.data.with.pred.on.testset.rds")
+
+write.table(mood.industry.data.with.pred.on.testset, file="mood.industry.data.with.pred.on.testset.csv", col.names = T, fileEncoding = "utf8", quote=T, sep=",")
+```
+
