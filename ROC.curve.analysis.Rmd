@@ -1,0 +1,74 @@
+---
+title: "ROC.curve.analysis"
+author: "Jean-Francois Chartier"
+date: "5 avril 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#Read data
+```{r}
+mood.industry.data=readRDS("mood.industry.data.with.pred.on.testset.rds")
+rocCurve.NoConsultation=readRDS("rocCurve.NoConsultation.rds")
+rocCurve.industry=readRDS("rocCurve.industry.rds")
+
+
+```
+
+#ROC curve analysis
+Accorde autant d'importance a la sensitivity que la specificity. 
+Mais ce que vous voulez c'est accorder plus d'importance a la specificity
+
+```{r}
+library(magrittr)
+
+#choose the data set
+#rocCurve.of.annot=rocCurve.industry
+rocCurve.of.annot=rocCurve.NoConsultation
+
+best.threshold=(rocCurve.of.annot$sensitivities+rocCurve.of.annot$specificities) %>%which.max(.) %>%rocCurve.of.annot$thresholds[.]
+
+#roc analysis
+roc.result=pROC::auc(rocCurve.of.annot)
+#confidence interval
+roc.ci=pROC::ci(rocCurve.of.annot)
+#plot the curve
+pROC::plot.roc(rocCurve.of.annot, legacy.axes = TRUE, print.thres="best", print.auc=T, auc.polygon=F, ci=F)
+```
+
+#Precision and recall tradeoff analysis
+```{r}
+eval.by.threshold=lapply(rocCurve.of.annot$thresholds, function(x){
+  #if (is.infinite(x))
+    #x=0
+  eval=caret::confusionMatrix(data=(rocCurve.of.annot$original.predictor>x) %>%as.factor(.), reference=rocCurve.of.annot$original.response, mode="everything", positive="TRUE")
+  c("prob.threshold"=x, eval$byClass[5:6])#%>%as.data.frame.list()
+})%>%Reduce(rbind, .) %>%as.data.frame(.)%>%set_rownames(NULL)
+
+ggplot2::quickplot(eval.by.threshold$Precision, eval.by.threshold$Recall, xlab = "Precision", ylab = "Recall", main = "Precision and Recall Tradeoff from Training Set")
+```
+
+
+#confusion matrix evaluation
+use threshold to encode probability predictions as classification predictions
+
+```{r}
+#just an example of selected threshold after the ROC curve analysis. The higher the probability threshold is and usually the higher will be the precision of the prediction 
+my.threshold=best.threshold+0.05
+
+eval.of.annotation<-caret::confusionMatrix(data=(rocCurve.of.annot$original.predictor>my.threshold) %>%as.factor(.), reference=rocCurve.of.annot$original.response, mode="everything", positive="TRUE")
+
+eval.of.annotation
+```
+
+#Select relevant data in whole dataset from threshold
+```{r}
+#an exemple where I selected only instances of the category "no.consultation" with a probability prediction higher than the threshold 
+select.mood.industry.data=mood.industry.data[mood.industry.data$pred.of.noConsult.prob>my.threshold,]
+```
+
