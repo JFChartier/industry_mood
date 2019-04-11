@@ -28,8 +28,8 @@ Mais ce que vous voulez c'est accorder plus d'importance a la specificity
 library(magrittr)
 
 #choose the data set
-#rocCurve.of.annot=rocCurve.industry
-rocCurve.of.annot=rocCurve.NoConsultation
+rocCurve.of.annot=rocCurve.industry
+#rocCurve.of.annot=rocCurve.NoConsultation
 
 best.threshold=(rocCurve.of.annot$sensitivities+rocCurve.of.annot$specificities) %>%which.max(.) %>%rocCurve.of.annot$thresholds[.]
 
@@ -58,8 +58,14 @@ ggplot2::quickplot(eval.by.threshold$Precision, eval.by.threshold$Recall, xlab =
 use threshold to encode probability predictions as classification predictions
 
 ```{r}
-#just an example of selected threshold after the ROC curve analysis. The higher the probability threshold is and usually the higher will be the precision of the prediction 
-my.threshold=best.threshold+0.05
+#just an example of selected threshold after the ROC curve analysis. The higher the probability threshold is and usually the higher will be the precision of the prediction
+
+#threshold based on ROC optimization
+#my.threshold=best.threshold
+
+#threshold based on a minimum Precision
+my.threshold=(eval.by.threshold$Precision>=.8) %>%eval.by.threshold[.,] %>% magrittr::extract(1,1)
+
 
 eval.of.annotation<-caret::confusionMatrix(data=(rocCurve.of.annot$original.predictor>my.threshold) %>%as.factor(.), reference=rocCurve.of.annot$original.response, mode="everything", positive="TRUE")
 
@@ -69,6 +75,16 @@ eval.of.annotation
 #Select relevant data in whole dataset from threshold
 ```{r}
 #an exemple where I selected only instances of the category "no.consultation" with a probability prediction higher than the threshold 
-select.mood.industry.data=mood.industry.data[mood.industry.data$pred.of.noConsult.prob>my.threshold,]
+
+#select.mood.industry.data=mood.industry.data[mood.industry.data$pred.of.noConsult.prob>my.threshold,]
+
+#subset data with predictions above the selected threshold 
+select.mood.industry.data=mood.industry.data[mood.industry.data$pred.of.industry.prob>my.threshold,]
+
+#number of segments
+nrow(select.mood.industry.data)
+#number of RIAS
+select.mood.industry.data$ID_final%>%unique(.)%>%length(.)
+
 ```
 
