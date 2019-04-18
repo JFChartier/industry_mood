@@ -59,10 +59,10 @@ use threshold to encode probability predictions as classification predictions
 
 ```{r}
 #just an example of selected threshold after the ROC curve analysis. The higher the probability threshold is and usually the higher will be the precision of the prediction
-
 #threshold based on ROC optimization
 #my.threshold=best.threshold
 
+#you can do the same thing but with the Precision analysis
 #threshold based on a minimum Precision
 my.threshold=(eval.by.threshold$Precision>=.8) %>%eval.by.threshold[.,] %>% magrittr::extract(1,1)
 
