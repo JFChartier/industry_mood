@@ -1,0 +1,644 @@
+---
+title: "PrepareData"
+author: "Jean-Francois Chartier"
+date: "24 avril 2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#install packages
+```{r}
+
+if ("stringr" %in% installed.packages()==FALSE){
+  install.packages('quanteda',dependencies = TRUE)
+}
+library(stringr)
+
+if ("magrittr" %in% installed.packages()==FALSE){
+  install.packages('quanteda',dependencies = TRUE)
+}
+library(magrittr)
+
+
+```
+
+
+#load data
+```{r}
+#mood.industry.data=readRDS("mood.industry.data4.rds")
+load("df_18avril.rda")
+
+```
+
+#Basic data preparetion steps
+
+##create dataframe with unambiguous colnames 
+```{r}
+mood.industry.data=data.frame(ID_final=df3$ID_final, ID_unique=df3$ID_unique, text=df3$group_sentences, sponsor.feature=df3$SPONSOR2, type.feature=df3$TYPE, act.feature=df3$ACT, label_of_class=df3$codename, text.all.rias=df3$RIAS, stringsAsFactors = F)
+
+training.set=sapply(mood.industry.data$label_of_class, FUN = function(x){
+  ifelse(test = x=="NA", FALSE, TRUE)
+})
+mood.industry.data$training.set=training.set
+
+
+```
+
+
+##trim and clean relevant data
+```{r}
+mood.industry.data$text=mood.industry.data$text%>%str_squish(.)%>%str_to_lower(.)
+mood.industry.data$text.all.rias=mood.industry.data$text.all.rias%>%str_squish(.)%>%str_to_lower(.)
+mood.industry.data$sponsor.feature=mood.industry.data$sponsor.feature%>%str_squish(.)%>%str_to_lower(.)
+mood.industry.data$type.feature=mood.industry.data$type.feature%>%str_squish(.)%>%str_to_lower(.)
+mood.industry.data$act.feature=mood.industry.data$act.feature%>%str_squish(.)%>%str_to_lower(.)
+
+```
+
+##correct errors in class label
+```{r}
+#some class label have an endline marker. We need to erase these
+class.label=mood.industry.data$label_of_class %>% stringi::stri_replace_all_fixed(., pattern = "\n", replacement = "", vectorize_all=T)
+
+#correct errors in class label "statment_professional"
+class.label[class.label=="statment_professional"]="statement_professional"
+
+mood.industry.data$label_of_class=class.label
+
+```
+
+##correct errors in type.feature
+```{r}
+#some class label have an endline marker. We need to erase these
+type.feature=mood.industry.data$type.feature %>% stringi::stri_replace_all_fixed(., pattern = "theorder", replacement = "the order", vectorize_all=T)
+
+mood.industry.data$type.feature=type.feature
+```
+
+
+##combine class labels
+```{r}
+statement_institution=(mood.industry.data$label_of_class=="statement_firstnations" | mood.industry.data$label_of_class=="statement_expert" |  mood.industry.data$label_of_class=="statement_institution")
+mood.industry.data$label_of_class[statement_institution]="statement_institution"
+
+statement_advocacy=(mood.industry.data$label_of_class=="statement_advocacy" | mood.industry.data$label_of_class=="statement_professional")
+mood.industry.data$label_of_class[statement_advocacy]="statement_advocacy"
+
+```
+
+##save mood.industry.data
+```{r}
+saveRDS(mood.industry.data, "mood.industry.data.4th.rds")
+```
+
+
+
+#encode annotation as probability
+```{r}
+annotations.prob.labels=mood.industry.data$new.class.label[idTain]%>%unique(.) #%>%paste0(., "_prob")
+
+anno.prob.for.obs=apply(mood.industry.data[idTain,c(2:4)], MARGIN = 1, function(x){
+  #str(x)
+  i=apply(mood.industry.data[idTain,c(2:4)], MARGIN = 1, function(y){
+    all(x==y)
+  })
+  #print(i)
+  
+  pr.of.label=rep(0, length(annotations.prob.labels)) %>%set_names(annotations.prob.labels)
+  
+  #get how many different labels used
+  labels=mood.industry.data$new.class.label[idTain][i]%>%unique(.)
+  p=1/length(labels)
+  #print(p)
+  
+  for (j in 1: length(labels))
+  {
+    pr.of.label[names(pr.of.label)==labels[j]]=p
+  }
+  
+  #sapply(labels, function(l){
+    #print(equals(names(pr.of.label),l))
+    #pr.of.label[equals(names(pr.of.label),l)]=p
+  #})
+  #print(pr.of.label)
+  pr.of.label
+  #data.frame(annotations.prob.labels)
+  #freq.of.dupli$freq[i] %>%data.table::first()
+})%>%t(.)
+
+anno.prob.for.obs=anno.prob.for.obs%>%set_colnames(.,paste0(colnames(anno.prob.for.obs), "_prob"))%>%as.data.frame()
+```
+
+#Text Preprocessing of text segments
+
+##functions used for text modeling
+```{r}
+#function to project query in latent semantic space
+  #'@param matrixV, a term-dim matrix m*k, of m terms previouslly modelleled with a SVD of k latent dimensions
+  #'@param sigularValues, the k singular values of the train SVD
+  #'@param newData, a new document-term matrix n*m to be projected in the latent space of k dimensions 
+predictFromTrainSvdModel<-function(matrixV, singularValues, newData)
+{
+  call <- match.call()
+  tsa <-  newData %*% matrixV %*% solve(diag((singularValues)))
+  result <- list(docs_newspace = tsa)
+  return (result)
+}
+
+#function to create a unit normed vector
+normVector <- function(x) 
+{
+  if(sum(x)==0)
+    return (x)
+  else 
+    return (x / sqrt(sum(x^2)))
+  
+}
+#function to norm many vectors
+normRowVectors<-function(m){
+  t(apply(m, MARGIN = 1, FUN = function(x) normVector(x)))
+}
+
+```
+
+##cleaning textual data
+```{r}
+#library(stringr)
+# tokenisation selon quanteda
+preprocesCorpus=stringr::str_replace_all(mood.industry.data$text,"[\r\n]" , "")
+#remove all non graphical caracther
+preprocesCorpus=stringr::str_replace_all(preprocesCorpus,"[^[:graph:]]", " ")
+#remove whitespace
+preprocesCorpus=stringr::str_squish(preprocesCorpus)
+```
+
+##Tokinization and word filtering
+```{r}
+
+preprocesCorpus=quanteda::tokens(x=preprocesCorpus,what="word", remove_punct = TRUE, remove_numbers = TRUE, remove_separators = TRUE,remove_hyphens = TRUE, remove_symbols=TRUE, remove_url = TRUE)
+
+preprocesCorpus=quanteda::tokens_tolower(preprocesCorpus)
+
+myStopWords=unique(c(stopwords("en", source = "smart")))
+
+# filtrer selon un antidictionnaire et singleton
+preprocesCorpus=quanteda::tokens_remove(preprocesCorpus, case_insensitive = F, valuetype = "glob", pattern=myStopWords, min_nchar=3)
+
+#lemmatization
+preprocesCorpus=sapply(preprocesCorpus, FUN = function(seg)  paste0(textstem::lemmatize_words(seg), collapse = " "))
+preprocesCorpus=quanteda::tokens(preprocesCorpus)
+
+#preprocesCorpus = quanteda::tokens_ngrams(preprocesCorpus, n=1:2)
+
+print(c("corpus size after preprocessing : " , length(paste(unlist(preprocesCorpus)))))
+
+print(c("vocabulary size after preprocessing : ", length(unique(paste(unlist(preprocesCorpus))) )))
+
+
+```
+
+##document*word frequency matrix modeling 
+```{r ,cache=T}
+#Vectorize documents 
+matrix.regcan = quanteda::dfm(x=preprocesCorpus, tolower=FALSE)
+
+#set filter
+minDocFreq = 5
+maxDocFreq = length(matrix.regcan)*.66
+
+#filter to rare and to frequent words and ngrams 
+matrix.regcan<-quanteda::dfm_trim(x=matrix.regcan, min_docfreq = minDocFreq, max_docfreq = maxDocFreq, docfreq_type="count")
+
+# imprimer nombre de dimensions de la matrice
+print(paste("nombre de mots differents apres filtrage base sur la frequence documentaire : ", length(matrix.regcan@Dimnames$features)))
+
+
+```
+
+##norm vectors
+```{r}
+
+#unit vector norm
+matrix.regcan.norm <- (t(apply(matrix.regcan, MARGIN = 1, FUN = function(x) normVector(x))))
+```
+
+##save document*word frequency matrix 
+```{r}
+saveRDS(matrix.regcan.norm, "wordfrequency.matrix.regcan.norm.4th.rds")
+```
+
+
+##document*word.ngrams frequency matrix modeling
+```{r}
+preprocesCorpus2=quanteda::tokens(preprocesCorpus, ngrams=2)
+#Vectorize documents 
+matrix.regcan.ngram = quanteda::dfm(x=preprocesCorpus2, tolower=FALSE)
+
+#set filter
+minDocFreq = 5
+maxDocFreq = length(matrix.regcan.ngram)*.66
+
+#filter to rare and to frequent words and ngrams 
+matrix.regcan.ngram<-quanteda::dfm_trim(x=matrix.regcan.ngram, min_docfreq = minDocFreq, max_docfreq = maxDocFreq, docfreq_type="count")
+
+# imprimer nombre de dimensions de la matrice
+print(paste("nombre de mots differents apres filtrage base sur la frequence documentaire : ", length(matrix.regcan.ngram@Dimnames$features)))
+```
+
+##norm vectors
+```{r}
+
+#unit vector norm
+matrix.regcan.ngram.norm <- (t(apply(matrix.regcan.ngram, MARGIN = 1, FUN = function(x) normVector(x))))
+```
+
+##save document*ngram frequency matrix 
+```{r}
+saveRDS(matrix.regcan.ngram.norm, "ngramfrequency.matrix.regcan.norm.4th.rds")
+```
+
+
+##build LSA model
+```{r}
+
+#svd.of.regcan.doc=RSpectra::svds(matrix.regcan.norm, 200)
+#reduced.svd.regcan.doc=svd.of.regcan.doc$u %*% solve(diag((svd.of.regcan.doc$d)))
+#saveRDS(reduced.svd.regcan.doc, "reduced.svd.regcan.doc.rds")
+#add colnames
+#svd.col.names=sapply(seq(1:ncol(reduced.svd.regcan.doc)), function(x) paste0("latent", x))
+#colnames(reduced.svd.regcan.doc)=svd.col.names
+
+
+svd.from.irba.200=irlba::irlba(matrix.regcan.norm, 200, tol=1e-5)
+#change colnames
+svd.col.names=sapply(seq(1:length(svd.from.irba.200$d)), function(x) paste0("latent", x))
+svd.from.irba.200$feature.names = svd.col.names
+
+```
+
+##save reduced lsa matrix
+```{r}
+saveRDS(svd.from.irba.200, file = "svd.of.regcan.from.irba.200.4th.rds")
+```
+
+#Text preprocessing of all RIAS
+
+
+##cleaning corpus
+```{r}
+#library(stringr)
+# tokenisation selon quanteda
+preprocesRias=stringr::str_replace_all(mood.industry.data$text.all.rias,"[\r\n]" , "")
+#remove all non graphical caracther
+preprocesRias=stringr::str_replace_all(preprocesRias,"[^[:graph:]]", " ")
+#remove whitespace
+preprocesRias=stringr::str_squish(preprocesRias)
+```
+
+##Tokinization and word filtering
+```{r}
+
+preprocesRias=quanteda::tokens(x=preprocesRias,what="word", remove_punct = TRUE, remove_numbers = TRUE, remove_separators = TRUE,remove_hyphens = TRUE, remove_symbols=TRUE, remove_url = TRUE)
+
+preprocesRias=quanteda::tokens_tolower(preprocesRias)
+
+myStopWords=unique(c(stopwords("en", source = "smart")))
+
+preprocesRias=quanteda::tokens_remove(preprocesRias, case_insensitive = F, valuetype = "glob", pattern=myStopWords, min_nchar=3)
+
+#lemmatization
+preprocesRias=sapply(preprocesRias, FUN = function(seg)  paste0(textstem::lemmatize_words(seg), collapse = " "))
+preprocesRias=quanteda::tokens(preprocesRias)
+
+#preprocesCorpus = quanteda::tokens_ngrams(preprocesCorpus, n=1:2)
+
+print(c("corpus size after preprocessing : " , length(paste(unlist(preprocesRias)))))
+
+print(c("vocabulary size after preprocessing : ", length(unique(paste(unlist(preprocesRias))) )))
+
+
+```
+
+##document*word frequency matrix modeling 
+```{r ,cache=T}
+#Vectorize documents 
+matrix.context.rias = quanteda::dfm(x=preprocesRias, tolower=FALSE)
+
+#set filter
+minDocFreq = 5
+maxDocFreq = length(matrix.context.rias)*.66
+
+#filter to rare and to frequent words and ngrams 
+matrix.context.rias<-quanteda::dfm_trim(x=matrix.context.rias, min_docfreq = minDocFreq, max_docfreq = maxDocFreq, docfreq_type="count")
+
+# imprimer nombre de dimensions de la matrice
+print(paste("nombre de mots differents apres filtrage base sur la frequence documentaire : ", length(matrix.context.rias@Dimnames$features)))
+
+
+```
+
+##norm vectors
+```{r}
+
+#unit vector norm
+matrix.context.rias.norm <- (t(apply(matrix.context.rias, MARGIN = 1, FUN = function(x) normVector(x))))
+```
+
+
+
+##save document*word frequency matrix 
+```{r}
+saveRDS(matrix.context.rias.norm, "matrix.context.rias.norm.4th.rds")
+```
+
+##build LSA model
+```{r}
+
+reduced.matrix.context.rias.400=irlba::irlba(matrix.context.rias.norm, 400, tol=1e-5)
+
+#change colnames
+svd.col.names=sapply(seq(1:length(reduced.matrix.context.rias.400$d)), function(x) paste0("global.latent.rias.", x))
+reduced.matrix.context.rias.400$feature.names = svd.col.names
+
+```
+
+
+##save 
+```{r}
+saveRDS(reduced.matrix.context.rias.400, "reduced.matrix.context.rias.400.4th.rds")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#Load data
+```{r}
+load("df_training_set.rda")
+load("df_test_set.rda")
+
+load("df_training_set_2.rda")
+
+df_training_set=rbind(df_training_set, df_training_set_2)
+id.doc <- unique(df_training_set_2$ID_final)
+#id.doc=unique(str_trim(id.doc, "both"))
+id.doc=as.factor(id.doc)
+#df_test_set$ID_final=str_trim(df_test_set$ID_final, "both") %>%as.factor(.)
+
+df_test_set.new = df_test_set[!(df_test_set$ID_final %in% id.doc),]
+#check 
+is.present=sapply(id.doc, function(x){
+  x%in%df_test_set$ID_final
+})
+
+
+```
+
+#save useful data only
+```{r}
+mood.industry.data=data.frame(ID_final=df_training_set$ID_final, text=df_training_set$seltext, sponsor.feature=df_training_set$SPONSOR2, type.feature=df_training_set$TYPE, act.feature=df_training_set$ACT, label_of_class=df_training_set$codename, training.set=rep(T,length(df_training_set$seltext)))
+
+mood.industry.data=rbind(mood.industry.data, data.frame(ID_final=df_test_set.new$ID_final, text=df_test_set.new$group_sentences, sponsor.feature=df_test_set.new$SPONSOR2, type.feature=df_test_set.new$TYPE, act.feature=df_test_set.new$ACT, label_of_class= rep(NA,length(df_test_set.new$group_sentences)), training.set= rep(F,length(df_test_set.new$group_sentences))))
+
+#trim data
+mood.industry.data$text=str_trim(mood.industry.data$text)
+
+#correct error in class label
+mood.industry.data$label_of_class[mood.industry.data$label_of_class=="statment_professional"]="statement_professional"
+mood.industry.data$label_of_class=droplevels(mood.industry.data$label_of_class)
+
+saveRDS(mood.industry.data, "mood.industry.data.rds")
+```
+
+
+Get new dataframe from 2019-02-19
+#save useful data only
+```{r}
+load("df_exemplars_2019-02-19.rda")
+
+mood.industry.data=data.frame(ID_final=df$ID_final, text=df$group_sentences, sponsor.feature=df$SPONSOR2, type.feature=df$TYPE, act.feature=df$ACT, label_of_class=df$codename, text.all.rias=df$RIAS_clean, stringsAsFactors = F)
+
+training.set=sapply(mood.industry.data$label_of_class, FUN = function(x){
+  ifelse(test = is.na(x), FALSE, TRUE)
+})
+mood.industry.data$training.set=training.set
+#trim data
+mood.industry.data$text=str_trim(mood.industry.data$text)
+
+#combine class labels
+statement_institution=(mood.industry.data$label_of_class=="statement_firstnations" | mood.industry.data$label_of_class=="statement_expert" |  mood.industry.data$label_of_class=="statement_institution")
+mood.industry.data$label_of_class[statement_institution]="statement_institution"
+
+statement_advocacy=(mood.industry.data$label_of_class=="statement_advocacy" | mood.industry.data$label_of_class=="statement_professional")
+mood.industry.data$label_of_class[statement_advocacy]="statement_advocacy"
+
+saveRDS(mood.industry.data, "mood.industry.data.rds")
+```
+
+#Add 3th annotations
+##Read data.frame mood.industry.data.rds
+```{r}
+mood.industry.data=readRDS("mood.industry.data.rds")
+
+new.annotation=read.csv(file = "hierar_lr2.csv", header = T, strip.white = T, blank.lines.skip = T, stringsAsFactors = F, encoding = "UTF-8")
+```
+
+##update class label
+from older annotation
+```{r}
+negative.class=(mood.industry.data$label_of_class=="no_comment" | mood.industry.data$label_of_class=="no_consultation" |  mood.industry.data$label_of_class=="no_statement")
+
+mood.industry.data$new.class.label=mood.industry.data$label_of_class
+
+mood.industry.data$new.class.label[negative.class==T]="is.not.consultation.label"
+```
+
+##encode annotation as probability
+```{r}
+#id.new.annotation=(apply(new.annotation[, 16:18], MARGIN = 1, function(x) {is.nx==c(NA,NA,NA)}))
+
+#id.new.annotation=rowSums(new.annotation[, 16:18]) %>%is.na(.)%>%magrittr::equals(F) %>% which()
+
+#id.new.isNotConsultation=new.annotation[, 16:18] %>% rowSums(.) %>%equals(0) %>%which()
+
+#id.new.2multi.label=new.annotation[, 16:18] %>% rowSums(.) %>%equals(2) %>%which()
+
+#id.new.3multi.label=new.annotation[, 16:18] %>% rowSums(.) %>%equals(3) %>%which()
+
+new.annotation.sum=new.annotation[, 16:18] %>% rowSums(.)
+
+new.annotation.prob=new.annotation[, 16:18] %>%divide_by(new.annotation.sum)%>%set_colnames(c(paste0(colnames(new.annotation[,16:18]), ".prob")))
+
+#add is.not.consultation.label prob value
+
+is.not.consultation.prob=sapply(new.annotation.sum, function(x){
+  if (is.na(x)){
+    NA
+  } else if (x==0){
+    1
+  }
+  else {
+    0
+  }
+})
+new.annotation.prob$is.not.consultation.prob=is.not.consultation.prob
+
+#id.duplicate = which(duplicated(new.annotation[id.new.multi.label,c(3)]))
+
+#unique.new.annotation=unique(new.annotation)
+
+#head(new.annotation[is.na(new.annotation$)])
+
+```
+
+##get old annotation prob
+```{r}
+idTain=which(mood.industry.data$training.set==T)
+#id.duplicate = which(duplicated(mood.industry.data[idTain,c(2)]))
+#id.duplicate = which(stringi::stri_duplicated(as.character(mood.industry.data[idTain,c(2)])))
+#id.duplicate = which(duplicated(as.character(mood.industry.data[idTain,c(2)])))
+
+#finding frequency of duplicated element
+#https://stackoverflow.com/questions/18201074/find-how-many-times-duplicated-rows-repeat-in-r-data-frame
+#freq.of.dupli=group_size(dplyr::group_by(mood.industry.data[idTain,c(2)]))
+
+#freq.of.dupli=mood.industry.data[idTain,c(2:4)] %>% dplyr::group_by(text, sponsor.feature, type.feature) %>% dplyr::group_size()%>%rep(.,.)
+
+freq.of.dupli=(mood.industry.data[idTain,c(2:4)])%>%plyr::count(., vars = c("text", "sponsor.feature", "type.feature"))
+
+
+freq.of.dupli.by.obs=apply(mood.industry.data[idTain,c(2:4)], MARGIN = 1, function(x){
+  #str(x)
+  i=apply(freq.of.dupli[,1:3], MARGIN = 1, function(y){
+    all(x==y)
+  })
+  #i=prodlim::row.match(x = x, table = freq.of.dupli[,1:3])
+  #print(i)
+  freq.of.dupli$freq[i] %>%data.table::first()
+})
+
+#View(cbind(mood.industry.data[idTain,c(2:4,9)], freq.of.dupli.by.obs))
+
+#get number of different annotations for same exemplar
+n.anno.for.dupli.obs=apply(mood.industry.data[idTain,c(2:4)], MARGIN = 1, function(x){
+  #str(x)
+  i=apply(mood.industry.data[idTain,c(2:4)], MARGIN = 1, function(y){
+    all(x==y)
+  })
+  #i=prodlim::row.match(x = x, table = freq.of.dupli[,1:3])
+  #print(i)
+  mood.industry.data$new.class.label[idTain][i]%>%unique(.)%>%length(.)
+  #freq.of.dupli$freq[i] %>%data.table::first()
+})
+
+View(cbind(mood.industry.data[idTain,c(2:4,9)], freq.of.dupli.by.obs, n.anno.for.dupli.obs))
+
+old.annotation.prob=1/n.anno.for.dupli.obs
+
+```
+
+##get old annotation prob
+```{r}
+annotations.prob.labels=mood.industry.data$new.class.label[idTain]%>%unique(.) #%>%paste0(., "_prob")
+
+anno.prob.for.obs=apply(mood.industry.data[idTain,c(2:4)], MARGIN = 1, function(x){
+  #str(x)
+  i=apply(mood.industry.data[idTain,c(2:4)], MARGIN = 1, function(y){
+    all(x==y)
+  })
+  #print(i)
+  
+  pr.of.label=rep(0, length(annotations.prob.labels)) %>%set_names(annotations.prob.labels)
+  
+  #get how many different labels used
+  labels=mood.industry.data$new.class.label[idTain][i]%>%unique(.)
+  p=1/length(labels)
+  #print(p)
+  
+  for (j in 1: length(labels))
+  {
+    pr.of.label[names(pr.of.label)==labels[j]]=p
+  }
+  
+  #sapply(labels, function(l){
+    #print(equals(names(pr.of.label),l))
+    #pr.of.label[equals(names(pr.of.label),l)]=p
+  #})
+  #print(pr.of.label)
+  pr.of.label
+  #data.frame(annotations.prob.labels)
+  #freq.of.dupli$freq[i] %>%data.table::first()
+})%>%t(.)
+
+anno.prob.for.obs=anno.prob.for.obs%>%set_colnames(.,paste0(colnames(anno.prob.for.obs), "_prob"))%>%as.data.frame()
+```
+
+
+##assign new annotation
+```{r}
+
+all.new.annotation.prob = data.frame(is.not.consultation.prob=numeric(length=nrow(mood.industry.data)), statement.advocacy.prob=numeric(length=nrow(mood.industry.data)), statement.institution.prob=numeric(length=nrow(mood.industry.data)), statement.industry.prob=numeric(length=nrow(mood.industry.data)))
+
+#adding old annotation prob
+all.new.annotation.prob$is.not.consultation.prob[idTain]=anno.prob.for.obs$is.not.consultation.label_prob
+all.new.annotation.prob$statement.advocacy.prob[idTain]=anno.prob.for.obs$statement_advocacy_prob
+all.new.annotation.prob$statement.industry.prob[idTain]=anno.prob.for.obs$statement_industry_prob
+all.new.annotation.prob$statement.institution.prob[idTain]=anno.prob.for.obs$statement_institution_prob
+
+#adding new annotation prob
+all.new.annotation.prob$is.not.consultation.prob[-idTain]=new.annotation.prob$is.not.consultation.prob
+all.new.annotation.prob$statement.advocacy.prob[-idTain]=new.annotation.prob$statement_advocacy_2.prob
+all.new.annotation.prob$statement.industry.prob[-idTain]=new.annotation.prob$statement_industry_2.prob
+all.new.annotation.prob$statement.institution.prob[-idTain]=new.annotation.prob$statement_institution_2.prob
+
+#combine dataframes 
+mood.industry.data=cbind(mood.industry.data, all.new.annotation.prob)
+
+#update idTrain
+newIdTrain=new.annotation.prob$is.not.consultation.prob %>% is.na(.)==F
+mood.industry.data$training.set[-idTain]=newIdTrain
+
+#add unique id
+mood.industry.data$uniqueID=1:nrow(mood.industry.data)
+```
+
+##post correction for NaN
+some sample use NaN instead of NA. Replace all NaN in idTrain by 0.0
+```{r}
+mood.industry.data[mood.industry.data$training.set==T, 11:13] = apply(mood.industry.data[mood.industry.data$training.set==T, 11:13], 1, function(x){
+  #print(x)
+  
+  x=if(all(x=="NaN")){
+    print(x)
+    y=c(0.0,0.0,0.0)
+  } else{
+    y=x
+  }
+  y
+  #print(x)
+})%>%t(.)
+```
+
+
+```{r}
+saveRDS(mood.industry.data, "mood.industry.data.with.prob.rds")
+```
+
