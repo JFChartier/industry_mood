@@ -74,7 +74,7 @@ eval.of.annotation
 
 #Select relevant data in whole dataset from threshold
 ```{r}
-#an exemple where I selected only instances of the category "no.consultation" with a probability prediction higher than the threshold 
+#an example where I selected only instances of the category "no.consultation" with a probability prediction higher than the threshold 
 
 #select.mood.industry.data=mood.industry.data[mood.industry.data$pred.of.noConsult.prob>my.threshold,]
 

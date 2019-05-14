@@ -1,0 +1,620 @@
+---
+title: "ClassificationAnalysisOfAnnotationProb"
+author: "Jean-Francois Chartier"
+date: "25 mars 2019"
+output: 
+  html_document:
+    fig_height: 8
+    fig_width: 8
+    number_sections: yes
+    toc: yes
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache.lazy = FALSE, cache=T, warning = FALSE, message = FALSE)
+```
+
+
+#install packages
+```{r}
+
+if ("magrittr" %in% installed.packages()==FALSE){
+  install.packages('quanteda',dependencies = TRUE)
+}
+library(magrittr)
+
+if ("caret" %in% installed.packages()==FALSE){
+  install.packages('caret',dependencies = TRUE)
+}
+library(caret)
+if ("rpart" %in% installed.packages()==FALSE){
+  install.packages('rpart',dependencies = TRUE)
+}
+library(rpart)
+
+if ("quanteda" %in% installed.packages()==FALSE){
+  install.packages('quanteda',dependencies = TRUE)
+}
+library(quanteda)
+
+if ("ranger" %in% installed.packages()==FALSE){
+  install.packages('ranger',dependencies = TRUE)
+}
+library(ranger)
+
+if ("pROC" %in% installed.packages()==FALSE){
+  install.packages('pROC',dependencies = TRUE)
+}
+library(pROC)
+
+if ("huxtable" %in% installed.packages()==FALSE){
+  install.packages('huxtable',dependencies = TRUE)
+}
+library(huxtable)
+
+
+```
+
+#homemade functions
+```{r}
+#function to create a unit normed vector
+normVector <- function(x) 
+{
+  if(sum(x)==0)
+    return (x)
+  else 
+    return (x / sqrt(sum(x^2)))
+  
+}
+#function to norm many vectors
+normRowVectors<-function(m){
+  t(apply(m, MARGIN = 1, FUN = function(x) normVector(x)))
+}
+```
+
+
+#read data
+```{r}
+mood.industry.data=readRDS("mood.industry.data.with.prob.4th.rds")
+wordfrequency.matrix.regcan=readRDS("wordfrequency.matrix.regcan.norm.4th.rds")
+
+ngramfrequency.matrix.regcan=readRDS("ngramfrequency.matrix.regcan.norm.4th.rds")
+
+reduced.matrix.context.rias=readRDS("reduced.matrix.context.rias.400.4th.rds")
+reduced.matrix.context.rias=  as.matrix(reduced.matrix.context.rias$u %*% solve(diag((reduced.matrix.context.rias$d)))) %>%  set_colnames(., reduced.matrix.context.rias$feature.names)
+
+lire la matrice de facteurs latent sur les segment
+
+
+#nont used
+#sentiment.regcan.matrix=readRDS("sentiment.regcan.matrix.rds")
+```
+
+#read all latent models
+```{r}
+n.latents=c(50, 100, 150, 200, 300, 400, 500, 800)
+
+latent.models=lapply(n.latents, FUN = function(k){
+  svd.of.regcan.from.irba = readRDS(paste0("svd.of.regcan.from.irba.", k, ".rds"))
+  
+  reduced.svd.regcan.doc=  as.matrix(svd.of.regcan.from.irba$u %*% solve(diag((svd.of.regcan.from.irba$d)))) #%>% normRowVectors()
+  colnames(reduced.svd.regcan.doc)=paste0(k,".",svd.of.regcan.from.irba$feature.names)
+  reduced.svd.regcan.doc
+  })
+
+```
+
+
+#get training id
+```{r}
+
+id.train=mood.industry.data$training.set==T
+```
+
+#Combine features
+##add meta data
+```{r}
+data.classification=mood.industry.data[,c(3:5,8, 10:13)]
+```
+
+##add word-matrix frequency
+```{r}
+data.classification=cbind(data.classification, as.matrix(wordfrequency.matrix.regcan)%>%set_colnames(., wordfrequency.matrix.regcan@Dimnames$features))
+```
+
+##add n-gram
+```{r}
+data.classification=cbind(data.classification, as.matrix(ngramfrequency.matrix.regcan)%>%set_colnames(., ngramfrequency.matrix.regcan@Dimnames$features))
+```
+
+##add sentiment features
+```{r}
+data.classification=cbind(data.classification, sentiment.regcan.matrix)
+```
+
+##add all latent models
+```{r}
+all.latent.models=do.call("cbind", latent.models)
+data.classification=cbind(data.classification, all.latent.models)
+```
+
+##add global.rias.latent
+```{r}
+#add global.rias.latent
+data.classification=cbind(data.classification, reduced.matrix.context.rias)
+
+```
+
+#prepare data for ml
+```{r}
+
+#change NA in sponsor
+#data.classification=data.classification.train
+i=data.classification$sponsor.feature%>%is.na(.)
+data.classification$sponsor.feature=as.character(data.classification$sponsor.feature)
+data.classification$sponsor.feature[i]="unknown.sponsor"
+data.classification$sponsor.feature=as.factor(data.classification$sponsor.feature)
+
+#extract train and test sets
+data.classification.train=data.classification[id.train, ]
+data.classification.test=data.classification[id.train==F, ]
+
+```
+
+#Classification based on threshold selection
+
+##set results table
+```{r}
+evaluation.global=data.frame(annotation=character(4), F1=numeric(4), Recall=numeric(4), Precision=numeric(4), AUC=numeric(4), Kappa=numeric(4), Accuracy=numeric(4), stringsAsFactors = F)
+```
+
+
+##subset of id train
+```{r}
+seed=123
+id.sub.train <- sample(nrow(data.classification.train), 2/3 * nrow(data.classification.train))
+```
+
+##is.not.consultation annotation
+###set features
+```{r}
+data.classification.train.target = data.classification.train[,-c(4,6:8)]
+
+data.classification.train.target$targeted.class=data.classification.train.target$is.not.consultation.prob
+data.classification.train.target$is.not.consultation.prob=NULL
+
+```
+
+###set threshold for classifiction
+```{r}
+my.threshold=0.1 #at least greater than 0
+data.classification.train.target$targeted.class=(data.classification.train.target$targeted.class>my.threshold) %>%as.factor(.)
+```
+
+
+
+###train on sub training set
+
+
+```{r}
+
+rf.notConsult.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.train.target[id.sub.train,], num.trees=40000, num.threads=6, classification=T, probability = T)
+
+#View(rf.notConsult.model$variable.importance, title = "impurity over is.not.consultation")
+
+```
+
+###Prediction on remaining 1/3 of training set
+```{r}
+
+rf.notConsul.pred=predict(rf.notConsult.model,data =  data.classification.train.target[-id.sub.train,])
+
+observed=data.classification.train.target$targeted.class[-id.sub.train]
+
+predicted=rf.notConsul.pred$predictions
+
+```
+
+###ROC curve evaluation
+use roc curve analysis to identify the best threshold for classification prediction
+```{r}
+#library(pROC)
+rocCurve.of.annot <- pROC::roc(response = observed,
+                                predictor = rf.notConsul.pred$predictions[,"TRUE"],
+                                levels = (levels(observed)))
+## This function assumes that the second
+## class is the event of interest, so we
+## reverse the labels.
+
+saveRDS(rocCurve.of.annot, "rocCurve.NoConsultation.rds")
+
+best.threshold=(rocCurve.of.annot$sensitivities+rocCurve.of.annot$specificities) %>%which.max(.) %>%rocCurve.of.annot$thresholds[.]
+
+
+pROC::auc(rocCurve.of.annot)
+pROC::ci(rocCurve.of.annot)
+pROC::plot.roc(rocCurve.of.annot, legacy.axes = TRUE, print.thres="best", print.auc=T, auc.polygon=F, ci=F)
+```
+
+###evaluation on confusion matrix
+```{r}
+eval.of.annotation<-caret::confusionMatrix(data=(predicted[,"TRUE"]>best.threshold) %>%as.factor(.), reference=observed, mode="everything", positive="TRUE")
+
+huxtable::as_huxtable(eval.of.annotation$overall,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
+
+huxtable::as_huxtable(eval.of.annotation$byClass,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
+
+evaluation.global[1,]=c("is.not.consultation", eval.of.annotation$byClass["F1"], eval.of.annotation$byClass["Recall"], eval.of.annotation$byClass["Precision"], pROC::auc(rocCurve.of.annot), eval.of.annotation$overall["Kappa"], eval.of.annotation$overall["Accuracy"])
+```
+
+##is.not.consultation without prob
+###train on sub training set
+```{r}
+
+rf.notConsult.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.train.target[id.sub.train,], num.trees=20000, num.threads=6, classification=T, importance = "impurity", probability = F)
+
+#View(rf.notConsult.model$variable.importance, title = "impurity over is.not.consultation")
+
+```
+
+###Prediction on remaining 1/3 of training set
+```{r}
+
+rf.notConsul.pred=predict(rf.notConsult.model,data =  data.classification.train.target[-id.sub.train,])
+
+observed=data.classification.train.target$targeted.class[-id.sub.train]
+
+predicted=rf.notConsul.pred$predictions
+
+```
+
+###evaluation on confusion matrix
+```{r}
+eval.of.annotation<-caret::confusionMatrix(data=predicted, reference=observed, mode="everything", positive="TRUE")
+
+huxtable::as_huxtable(eval.of.annotation$overall,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
+
+huxtable::as_huxtable(eval.of.annotation$byClass,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
+
+```
+
+##institution annotation
+###set features
+```{r}
+data.classification.train.target = data.classification.train[,-c(4:6,8)]
+
+data.classification.train.target$targeted.class=data.classification.train.target$statement.institution.prob
+data.classification.train.target$statement.institution.prob=NULL
+
+```
+
+###set threshold for classifiction
+```{r}
+my.threshold=0.1 #at least greater than 0
+data.classification.train.target$targeted.class=(data.classification.train.target$targeted.class>my.threshold) %>%as.factor(.)
+```
+
+###train on sub training set
+```{r}
+
+rf.institution.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.train.target[id.sub.train,], num.trees=40000, num.threads=6, classification=T, probability = T)
+
+#View(rf.notConsult.model$variable.importance, title = "impurity over is.not.consultation")
+
+```
+
+###Prediction on remaining 1/3 of training set
+```{r}
+
+rf.institution.pred=predict(rf.institution.model, data =  data.classification.train.target[-id.sub.train,])
+
+observed=data.classification.train.target$targeted.class[-id.sub.train]
+
+predicted=rf.institution.pred$predictions
+
+```
+
+###ROC curve evaluation
+use roc curve analysis to identify the best threshold for classification prediction
+```{r}
+#library(pROC)
+rocCurve.of.annot <- pROC::roc(response = observed,
+                                predictor = rf.institution.pred$predictions[,"TRUE"],
+                                levels = (levels(observed)))
+## This function assumes that the second
+## class is the event of interest, so we
+## reverse the labels.
+
+saveRDS(rocCurve.of.annot, "rocCurve.institution.rds")
+
+best.threshold=(rocCurve.of.annot$sensitivities+rocCurve.of.annot$specificities) %>%which.max(.) %>%rocCurve.of.annot$thresholds[.]
+
+pROC::auc(rocCurve.of.annot)
+pROC::ci(rocCurve.of.annot)
+pROC::plot.roc(rocCurve.of.annot, legacy.axes = TRUE, print.thres="best", print.auc=T, auc.polygon=F, ci=F)
+```
+
+###evaluation on confusion matrix
+```{r}
+eval.of.annotation<-caret::confusionMatrix(data=(predicted[,"TRUE"]>best.threshold) %>%as.factor(.), reference=observed, mode="everything", positive="TRUE")
+
+huxtable::as_huxtable(eval.of.annotation$overall,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
+
+huxtable::as_huxtable(eval.of.annotation$byClass,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
+
+evaluation.global[2,]=c("institution", eval.of.annotation$byClass["F1"], eval.of.annotation$byClass["Recall"], eval.of.annotation$byClass["Precision"], pROC::auc(rocCurve.of.annot), eval.of.annotation$overall["Kappa"], eval.of.annotation$overall["Accuracy"])
+```
+
+##advocacy annotation
+###set features
+```{r}
+data.classification.train.target = data.classification.train[,-c(4:5,7:8)]
+
+data.classification.train.target$targeted.class=data.classification.train.target$statement.advocacy.prob
+data.classification.train.target$statement.advocacy.prob=NULL
+
+```
+
+###set threshold for classification
+```{r}
+my.threshold=0.1 #at least greater than 0
+data.classification.train.target$targeted.class=(data.classification.train.target$targeted.class>my.threshold) %>%as.factor(.)
+```
+
+###train on sub training set
+```{r}
+
+rf.advocacy.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.train.target[id.sub.train,], num.trees=40000, num.threads=6, classification=T, probability = T)
+
+
+```
+
+###Prediction on remaining 1/3 of training set
+```{r}
+
+rf.advocacy.pred=predict(rf.advocacy.model, data =  data.classification.train.target[-id.sub.train,])
+
+observed=data.classification.train.target$targeted.class[-id.sub.train]
+
+predicted=rf.advocacy.pred$predictions
+
+```
+
+###ROC curve evaluation
+use roc curve analysis to identify the best threshold for classification prediction
+```{r}
+#library(pROC)
+rocCurve.of.annot <- pROC::roc(response = observed,
+                                predictor = rf.advocacy.pred$predictions[,"TRUE"],
+                                levels = (levels(observed)))
+## This function assumes that the second
+## class is the event of interest, so we
+## reverse the labels.
+
+saveRDS(rocCurve.of.annot, "rocCurve.advocacy.rds")
+
+best.threshold=(rocCurve.of.annot$sensitivities+rocCurve.of.annot$specificities) %>%which.max(.) %>%rocCurve.of.annot$thresholds[.]
+
+pROC::auc(rocCurve.of.annot)
+pROC::ci(rocCurve.of.annot)
+pROC::plot.roc(rocCurve.of.annot, legacy.axes = TRUE, print.thres="best", print.auc=T, auc.polygon=F, ci=F)
+```
+
+###evaluation on confusion matrix
+```{r}
+eval.of.annotation<-caret::confusionMatrix(data=(predicted[,"TRUE"]>best.threshold) %>%as.factor(.), reference=observed, mode="everything", positive="TRUE")
+
+huxtable::as_huxtable(eval.of.annotation$overall,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
+
+huxtable::as_huxtable(eval.of.annotation$byClass,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
+
+evaluation.global[3,]=c("advocacy", eval.of.annotation$byClass["F1"], eval.of.annotation$byClass["Recall"], eval.of.annotation$byClass["Precision"], pROC::auc(rocCurve.of.annot), eval.of.annotation$overall["Kappa"], eval.of.annotation$overall["Accuracy"])
+```
+
+##industry annotation
+###set features
+```{r}
+data.classification.train.target = data.classification.train[,-c(4:7)]
+
+data.classification.train.target$targeted.class=data.classification.train.target$statement.industry.prob
+data.classification.train.target$statement.industry.prob=NULL
+
+```
+
+###set threshold for classification
+```{r}
+my.threshold=0.1 #at least greater than 0
+data.classification.train.target$targeted.class=(data.classification.train.target$targeted.class>my.threshold) %>%as.factor(.)
+```
+
+###train on sub training set
+```{r}
+
+rf.industry.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.train.target[id.sub.train,], num.trees=40000, num.threads=6, classification=T, probability = T)
+
+#View(rf.notConsult.model$variable.importance, title = "impurity over is.not.consultation")
+
+```
+
+###Prediction on remaining 1/3 of training set
+```{r}
+
+rf.industry.pred=predict(rf.industry.model, data =  data.classification.train.target[-id.sub.train,])
+#test
+
+observed=data.classification.train.target$targeted.class[-id.sub.train]
+
+predicted=rf.industry.pred$predictions
+
+```
+
+###ROC curve evaluation
+use roc curve analysis to identify the best threshold for classification prediction
+```{r}
+#library(pROC) 
+rocCurve.of.annot <- pROC::roc(response = observed,
+                                predictor = rf.industry.pred$predictions[,"TRUE"],
+                                levels = (levels(observed)))
+## This function assumes that the second
+## class is the event of interest, so we
+## reverse the labels.
+
+saveRDS(rocCurve.of.annot, "rocCurve.industry.rds")
+
+best.threshold=(rocCurve.of.annot$sensitivities+rocCurve.of.annot$specificities) %>%which.max(.) %>%rocCurve.of.annot$thresholds[.]
+
+pROC::auc(rocCurve.of.annot)
+pROC::ci(rocCurve.of.annot)
+pROC::plot.roc(rocCurve.of.annot, legacy.axes = TRUE, print.thres="best", print.auc=T, auc.polygon=F, ci=F)
+```
+
+###evaluation on confusion matrix
+```{r}
+eval.of.annotation<-caret::confusionMatrix(data=(predicted[,"TRUE"]>best.threshold) %>%as.factor(.), reference=observed, mode="everything", positive="TRUE")
+
+
+huxtable::as_huxtable(eval.of.annotation$overall,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
+
+huxtable::as_huxtable(eval.of.annotation$byClass,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
+
+evaluation.global[4,]=c("industry", eval.of.annotation$byClass["F1"], eval.of.annotation$byClass["Recall"], eval.of.annotation$byClass["Precision"], pROC::auc(rocCurve.of.annot), eval.of.annotation$overall["Kappa"], eval.of.annotation$overall["Accuracy"])
+```
+
+##Plot global evalutions of annotations
+```{r}
+
+huxtable::as_huxtable(evaluation.global, add_colnames=T)%>%huxtable::theme_basic(.)
+
+```
+
+#Prediction on test set
+
+
+##is.not.consultation annotation
+###set features
+```{r}
+data.classification.target = data.classification[,-c(4,6:8)]
+
+data.classification.target$targeted.class=data.classification.target$is.not.consultation.prob
+data.classification.target$is.not.consultation.prob=NULL
+
+```
+
+###set threshold for classifiction
+```{r}
+my.threshold=0.1 #at least greater than 0
+data.classification.target$targeted.class=(data.classification.target$targeted.class>my.threshold) %>%as.factor(.)
+```
+
+###train on all training set
+```{r}
+
+rf.notConsult.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.target[id.train,], num.trees=40000, num.threads=6, classification=T, probability = T)
+
+```
+
+###Prediction on train and test sets
+```{r}
+
+rf.notConsul.pred=predict(rf.notConsult.model, data =  data.classification.target[, names(data.classification.target)!="targeted.class"])
+
+pred.of.noConsult.prob=rf.notConsul.pred$predictions[,"TRUE"]
+
+```
+
+##industry annotation
+###set features
+```{r}
+data.classification.target = data.classification[,-c(4:7)]
+
+data.classification.target$targeted.class=data.classification.target$statement.industry.prob
+data.classification.target$statement.industry.prob=NULL
+
+```
+
+###set threshold for classification
+```{r}
+my.threshold=0.1 #at least greater than 0
+data.classification.target$targeted.class=(data.classification.target$targeted.class>my.threshold) %>%as.factor(.)
+```
+
+###train on training set
+```{r}
+
+rf.industry.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.target[id.train,], num.trees=40000, num.threads=6, classification=T, probability = T)
+
+```
+
+###Prediction on train and test set
+```{r}
+
+rf.industry.pred=predict(rf.industry.model, data =  data.classification.target[,names(data.classification.target)!="targeted.class"])
+
+pred.of.industry.prob=rf.industry.pred$predictions[,"TRUE"]
+
+```
+
+
+##Save results
+```{r}
+mood.industry.data.with.pred.on.testset=cbind(mood.industry.data, pred.of.noConsult.prob, pred.of.industry.prob)
+saveRDS(mood.industry.data.with.pred.on.testset, "mood.industry.data.with.pred.on.testset.rds")
+
+write.table(mood.industry.data.with.pred.on.testset, file="mood.industry.data.with.pred.on.testset.csv", col.names = T, fileEncoding = "utf8", quote=T, sep=",")
+```
+
+
+#Comparative evaluation with other algorithms
+
+##tuning
+https://stats.stackexchange.com/questions/229356/gbm-package-vs-caret-using-gbm
+```{r}
+fitControl <- trainControl(## 10-fold CV
+                           method = "cv",
+                           number = 10)
+
+# Using caret
+caretGrid <- expand.grid(interaction.depth=c(1, 3, 5), n.trees = (0:50)*50,
+                   shrinkage=c(0.01, 0.001),
+                   n.minobsinnode=10)
+```
+
+##is.not.consultation annotation
+###set features
+```{r}
+data.classification.target = data.classification[,-c(4,6:8)]
+
+data.classification.target$targeted.class=data.classification.target$is.not.consultation.prob
+data.classification.target$is.not.consultation.prob=NULL
+
+```
+
+###set threshold for classifiction
+```{r}
+my.threshold=0.1 #at least greater than 0
+data.classification.target$targeted.class=(data.classification.target$targeted.class>my.threshold) %>%as.factor(.)
+```
+###train on all training set
+```{r}
+
+rf.notConsult.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.target[id.train,], num.trees=40000, num.threads=6, classification=T, probability = T)
+
+```
+
+```{r}
+set.seed(825)
+gbmFit1 <- train(targeted.class ~ ., data = data.classification.target[id.train,], 
+                 method = "gbm", 
+                 trControl = fitControl,
+                 
+                 ## This last option is actually one
+                 ## for gbm() that passes through
+                 verbose = FALSE)
+```
+
+
+
+
+

@@ -15,15 +15,11 @@ knitr::opts_chunk$set(echo = TRUE)
 #install packages
 ```{r}
 
-if ("stringr" %in% installed.packages()==FALSE){
-  install.packages('quanteda',dependencies = TRUE)
-}
-library(stringr)
 
-if ("magrittr" %in% installed.packages()==FALSE){
-  install.packages('quanteda',dependencies = TRUE)
-}
+library(stringr)
 library(magrittr)
+library(dplyr)
+library(quanteda)
 
 
 ```
@@ -90,30 +86,58 @@ mood.industry.data$label_of_class[statement_institution]="statement_institution"
 statement_advocacy=(mood.industry.data$label_of_class=="statement_advocacy" | mood.industry.data$label_of_class=="statement_professional")
 mood.industry.data$label_of_class[statement_advocacy]="statement_advocacy"
 
+negative.class=(mood.industry.data$label_of_class=="no_comment" | mood.industry.data$label_of_class=="no_consultation" |  mood.industry.data$label_of_class=="no_statement")
+
+mood.industry.data$label_of_class[negative.class]="is.not.consultation.label"
+
 ```
 
-##save mood.industry.data
+
+##keep only unique entries
+here we keep only entries that share the same text segment, ministry, and class label. The annotators have produced a lot of duplicates during their analysis. We nned to filter them in order to not add biais in the training set
+```{r}
+
+id.train.duplicate=mood.industry.data[mood.industry.data$training.set==T, c("text","sponsor.feature", "label_of_class")] %>% duplicated(.)
+
+id.test.duplicated=mood.industry.data[mood.industry.data$training.set==F, c("text","sponsor.feature")] %>% duplicated(.)
+
+mood.industry.train.data=mood.industry.data %>% filter(., training.set==T) %>% filter(., id.train.duplicate==F)
+
+mood.industry.test.data=mood.industry.data %>% filter(., training.set==F) %>% filter(., id.test.duplicated==F)
+
+
+mood.industry.data=rbind(mood.industry.train.data, mood.industry.test.data)
+```
+
+###save mood.industry.data
 ```{r}
 saveRDS(mood.industry.data, "mood.industry.data.4th.rds")
 ```
 
-
-
-#encode annotation as probability
 ```{r}
-annotations.prob.labels=mood.industry.data$new.class.label[idTain]%>%unique(.) #%>%paste0(., "_prob")
+idTrain=(mood.industry.data$training.set==T)
+```
 
-anno.prob.for.obs=apply(mood.industry.data[idTain,c(2:4)], MARGIN = 1, function(x){
+
+##encode annotation as probability
+```{r}
+#mood.industry.data=readRDS("mood.industry.data.4th.rds")
+
+#get all unique class label
+annotations.prob.labels=mood.industry.data$label_of_class[idTrain]%>%unique(.) #%>%paste0(., "_prob")
+
+#retrieve all identical text segments, and get all different class labels annotators have asigned to them. For example, if a same text segment has been assigned to 3 different labels, we infer that this text segment has a label probability of 0.3 for these 3 class labels and 0 for the others.  
+anno.prob.for.obs=sapply(mood.industry.data[idTrain,c("text")], function(x){
   #str(x)
-  i=apply(mood.industry.data[idTain,c(2:4)], MARGIN = 1, function(y){
-    all(x==y)
+  i=sapply(mood.industry.data[idTrain,c("text")], function(y){
+    (x==y)
   })
   #print(i)
   
   pr.of.label=rep(0, length(annotations.prob.labels)) %>%set_names(annotations.prob.labels)
   
   #get how many different labels used
-  labels=mood.industry.data$new.class.label[idTain][i]%>%unique(.)
+  labels=mood.industry.data$label_of_class[idTrain][i]%>%unique(.)
   p=1/length(labels)
   #print(p)
   
@@ -134,6 +158,31 @@ anno.prob.for.obs=apply(mood.industry.data[idTain,c(2:4)], MARGIN = 1, function(
 
 anno.prob.for.obs=anno.prob.for.obs%>%set_colnames(.,paste0(colnames(anno.prob.for.obs), "_prob"))%>%as.data.frame()
 ```
+
+
+##assign new annotation
+```{r}
+
+all.new.annotation.prob = data.frame(is.not.consultation.prob=numeric(length=nrow(mood.industry.data)), statement.advocacy.prob=numeric(length=nrow(mood.industry.data)), statement.institution.prob=numeric(length=nrow(mood.industry.data)), statement.industry.prob=numeric(length=nrow(mood.industry.data)))
+
+#adding old annotation prob
+all.new.annotation.prob$is.not.consultation.prob[idTrain]=anno.prob.for.obs$is.not.consultation.label_prob
+all.new.annotation.prob$statement.advocacy.prob[idTrain]=anno.prob.for.obs$statement_advocacy_prob
+all.new.annotation.prob$statement.industry.prob[idTrain]=anno.prob.for.obs$statement_industry_prob
+all.new.annotation.prob$statement.institution.prob[idTrain]=anno.prob.for.obs$statement_institution_prob
+
+
+#combine dataframes 
+mood.industry.data.with.prob=cbind(mood.industry.data, all.new.annotation.prob)
+
+
+```
+
+###save
+```{r}
+saveRDS(mood.industry.data, "mood.industry.data.with.prob.4th.rds")
+```
+
 
 #Text Preprocessing of text segments
 
@@ -331,7 +380,7 @@ print(c("vocabulary size after preprocessing : ", length(unique(paste(unlist(pre
 matrix.context.rias = quanteda::dfm(x=preprocesRias, tolower=FALSE)
 
 #set filter
-minDocFreq = 5
+minDocFreq = 15
 maxDocFreq = length(matrix.context.rias)*.66
 
 #filter to rare and to frequent words and ngrams 
@@ -383,262 +432,4 @@ saveRDS(reduced.matrix.context.rias.400, "reduced.matrix.context.rias.400.4th.rd
 
 
 
-
-
-
-
-
-
-
-#Load data
-```{r}
-load("df_training_set.rda")
-load("df_test_set.rda")
-
-load("df_training_set_2.rda")
-
-df_training_set=rbind(df_training_set, df_training_set_2)
-id.doc <- unique(df_training_set_2$ID_final)
-#id.doc=unique(str_trim(id.doc, "both"))
-id.doc=as.factor(id.doc)
-#df_test_set$ID_final=str_trim(df_test_set$ID_final, "both") %>%as.factor(.)
-
-df_test_set.new = df_test_set[!(df_test_set$ID_final %in% id.doc),]
-#check 
-is.present=sapply(id.doc, function(x){
-  x%in%df_test_set$ID_final
-})
-
-
-```
-
-#save useful data only
-```{r}
-mood.industry.data=data.frame(ID_final=df_training_set$ID_final, text=df_training_set$seltext, sponsor.feature=df_training_set$SPONSOR2, type.feature=df_training_set$TYPE, act.feature=df_training_set$ACT, label_of_class=df_training_set$codename, training.set=rep(T,length(df_training_set$seltext)))
-
-mood.industry.data=rbind(mood.industry.data, data.frame(ID_final=df_test_set.new$ID_final, text=df_test_set.new$group_sentences, sponsor.feature=df_test_set.new$SPONSOR2, type.feature=df_test_set.new$TYPE, act.feature=df_test_set.new$ACT, label_of_class= rep(NA,length(df_test_set.new$group_sentences)), training.set= rep(F,length(df_test_set.new$group_sentences))))
-
-#trim data
-mood.industry.data$text=str_trim(mood.industry.data$text)
-
-#correct error in class label
-mood.industry.data$label_of_class[mood.industry.data$label_of_class=="statment_professional"]="statement_professional"
-mood.industry.data$label_of_class=droplevels(mood.industry.data$label_of_class)
-
-saveRDS(mood.industry.data, "mood.industry.data.rds")
-```
-
-
-Get new dataframe from 2019-02-19
-#save useful data only
-```{r}
-load("df_exemplars_2019-02-19.rda")
-
-mood.industry.data=data.frame(ID_final=df$ID_final, text=df$group_sentences, sponsor.feature=df$SPONSOR2, type.feature=df$TYPE, act.feature=df$ACT, label_of_class=df$codename, text.all.rias=df$RIAS_clean, stringsAsFactors = F)
-
-training.set=sapply(mood.industry.data$label_of_class, FUN = function(x){
-  ifelse(test = is.na(x), FALSE, TRUE)
-})
-mood.industry.data$training.set=training.set
-#trim data
-mood.industry.data$text=str_trim(mood.industry.data$text)
-
-#combine class labels
-statement_institution=(mood.industry.data$label_of_class=="statement_firstnations" | mood.industry.data$label_of_class=="statement_expert" |  mood.industry.data$label_of_class=="statement_institution")
-mood.industry.data$label_of_class[statement_institution]="statement_institution"
-
-statement_advocacy=(mood.industry.data$label_of_class=="statement_advocacy" | mood.industry.data$label_of_class=="statement_professional")
-mood.industry.data$label_of_class[statement_advocacy]="statement_advocacy"
-
-saveRDS(mood.industry.data, "mood.industry.data.rds")
-```
-
-#Add 3th annotations
-##Read data.frame mood.industry.data.rds
-```{r}
-mood.industry.data=readRDS("mood.industry.data.rds")
-
-new.annotation=read.csv(file = "hierar_lr2.csv", header = T, strip.white = T, blank.lines.skip = T, stringsAsFactors = F, encoding = "UTF-8")
-```
-
-##update class label
-from older annotation
-```{r}
-negative.class=(mood.industry.data$label_of_class=="no_comment" | mood.industry.data$label_of_class=="no_consultation" |  mood.industry.data$label_of_class=="no_statement")
-
-mood.industry.data$new.class.label=mood.industry.data$label_of_class
-
-mood.industry.data$new.class.label[negative.class==T]="is.not.consultation.label"
-```
-
-##encode annotation as probability
-```{r}
-#id.new.annotation=(apply(new.annotation[, 16:18], MARGIN = 1, function(x) {is.nx==c(NA,NA,NA)}))
-
-#id.new.annotation=rowSums(new.annotation[, 16:18]) %>%is.na(.)%>%magrittr::equals(F) %>% which()
-
-#id.new.isNotConsultation=new.annotation[, 16:18] %>% rowSums(.) %>%equals(0) %>%which()
-
-#id.new.2multi.label=new.annotation[, 16:18] %>% rowSums(.) %>%equals(2) %>%which()
-
-#id.new.3multi.label=new.annotation[, 16:18] %>% rowSums(.) %>%equals(3) %>%which()
-
-new.annotation.sum=new.annotation[, 16:18] %>% rowSums(.)
-
-new.annotation.prob=new.annotation[, 16:18] %>%divide_by(new.annotation.sum)%>%set_colnames(c(paste0(colnames(new.annotation[,16:18]), ".prob")))
-
-#add is.not.consultation.label prob value
-
-is.not.consultation.prob=sapply(new.annotation.sum, function(x){
-  if (is.na(x)){
-    NA
-  } else if (x==0){
-    1
-  }
-  else {
-    0
-  }
-})
-new.annotation.prob$is.not.consultation.prob=is.not.consultation.prob
-
-#id.duplicate = which(duplicated(new.annotation[id.new.multi.label,c(3)]))
-
-#unique.new.annotation=unique(new.annotation)
-
-#head(new.annotation[is.na(new.annotation$)])
-
-```
-
-##get old annotation prob
-```{r}
-idTain=which(mood.industry.data$training.set==T)
-#id.duplicate = which(duplicated(mood.industry.data[idTain,c(2)]))
-#id.duplicate = which(stringi::stri_duplicated(as.character(mood.industry.data[idTain,c(2)])))
-#id.duplicate = which(duplicated(as.character(mood.industry.data[idTain,c(2)])))
-
-#finding frequency of duplicated element
-#https://stackoverflow.com/questions/18201074/find-how-many-times-duplicated-rows-repeat-in-r-data-frame
-#freq.of.dupli=group_size(dplyr::group_by(mood.industry.data[idTain,c(2)]))
-
-#freq.of.dupli=mood.industry.data[idTain,c(2:4)] %>% dplyr::group_by(text, sponsor.feature, type.feature) %>% dplyr::group_size()%>%rep(.,.)
-
-freq.of.dupli=(mood.industry.data[idTain,c(2:4)])%>%plyr::count(., vars = c("text", "sponsor.feature", "type.feature"))
-
-
-freq.of.dupli.by.obs=apply(mood.industry.data[idTain,c(2:4)], MARGIN = 1, function(x){
-  #str(x)
-  i=apply(freq.of.dupli[,1:3], MARGIN = 1, function(y){
-    all(x==y)
-  })
-  #i=prodlim::row.match(x = x, table = freq.of.dupli[,1:3])
-  #print(i)
-  freq.of.dupli$freq[i] %>%data.table::first()
-})
-
-#View(cbind(mood.industry.data[idTain,c(2:4,9)], freq.of.dupli.by.obs))
-
-#get number of different annotations for same exemplar
-n.anno.for.dupli.obs=apply(mood.industry.data[idTain,c(2:4)], MARGIN = 1, function(x){
-  #str(x)
-  i=apply(mood.industry.data[idTain,c(2:4)], MARGIN = 1, function(y){
-    all(x==y)
-  })
-  #i=prodlim::row.match(x = x, table = freq.of.dupli[,1:3])
-  #print(i)
-  mood.industry.data$new.class.label[idTain][i]%>%unique(.)%>%length(.)
-  #freq.of.dupli$freq[i] %>%data.table::first()
-})
-
-View(cbind(mood.industry.data[idTain,c(2:4,9)], freq.of.dupli.by.obs, n.anno.for.dupli.obs))
-
-old.annotation.prob=1/n.anno.for.dupli.obs
-
-```
-
-##get old annotation prob
-```{r}
-annotations.prob.labels=mood.industry.data$new.class.label[idTain]%>%unique(.) #%>%paste0(., "_prob")
-
-anno.prob.for.obs=apply(mood.industry.data[idTain,c(2:4)], MARGIN = 1, function(x){
-  #str(x)
-  i=apply(mood.industry.data[idTain,c(2:4)], MARGIN = 1, function(y){
-    all(x==y)
-  })
-  #print(i)
-  
-  pr.of.label=rep(0, length(annotations.prob.labels)) %>%set_names(annotations.prob.labels)
-  
-  #get how many different labels used
-  labels=mood.industry.data$new.class.label[idTain][i]%>%unique(.)
-  p=1/length(labels)
-  #print(p)
-  
-  for (j in 1: length(labels))
-  {
-    pr.of.label[names(pr.of.label)==labels[j]]=p
-  }
-  
-  #sapply(labels, function(l){
-    #print(equals(names(pr.of.label),l))
-    #pr.of.label[equals(names(pr.of.label),l)]=p
-  #})
-  #print(pr.of.label)
-  pr.of.label
-  #data.frame(annotations.prob.labels)
-  #freq.of.dupli$freq[i] %>%data.table::first()
-})%>%t(.)
-
-anno.prob.for.obs=anno.prob.for.obs%>%set_colnames(.,paste0(colnames(anno.prob.for.obs), "_prob"))%>%as.data.frame()
-```
-
-
-##assign new annotation
-```{r}
-
-all.new.annotation.prob = data.frame(is.not.consultation.prob=numeric(length=nrow(mood.industry.data)), statement.advocacy.prob=numeric(length=nrow(mood.industry.data)), statement.institution.prob=numeric(length=nrow(mood.industry.data)), statement.industry.prob=numeric(length=nrow(mood.industry.data)))
-
-#adding old annotation prob
-all.new.annotation.prob$is.not.consultation.prob[idTain]=anno.prob.for.obs$is.not.consultation.label_prob
-all.new.annotation.prob$statement.advocacy.prob[idTain]=anno.prob.for.obs$statement_advocacy_prob
-all.new.annotation.prob$statement.industry.prob[idTain]=anno.prob.for.obs$statement_industry_prob
-all.new.annotation.prob$statement.institution.prob[idTain]=anno.prob.for.obs$statement_institution_prob
-
-#adding new annotation prob
-all.new.annotation.prob$is.not.consultation.prob[-idTain]=new.annotation.prob$is.not.consultation.prob
-all.new.annotation.prob$statement.advocacy.prob[-idTain]=new.annotation.prob$statement_advocacy_2.prob
-all.new.annotation.prob$statement.industry.prob[-idTain]=new.annotation.prob$statement_industry_2.prob
-all.new.annotation.prob$statement.institution.prob[-idTain]=new.annotation.prob$statement_institution_2.prob
-
-#combine dataframes 
-mood.industry.data=cbind(mood.industry.data, all.new.annotation.prob)
-
-#update idTrain
-newIdTrain=new.annotation.prob$is.not.consultation.prob %>% is.na(.)==F
-mood.industry.data$training.set[-idTain]=newIdTrain
-
-#add unique id
-mood.industry.data$uniqueID=1:nrow(mood.industry.data)
-```
-
-##post correction for NaN
-some sample use NaN instead of NA. Replace all NaN in idTrain by 0.0
-```{r}
-mood.industry.data[mood.industry.data$training.set==T, 11:13] = apply(mood.industry.data[mood.industry.data$training.set==T, 11:13], 1, function(x){
-  #print(x)
-  
-  x=if(all(x=="NaN")){
-    print(x)
-    y=c(0.0,0.0,0.0)
-  } else{
-    y=x
-  }
-  y
-  #print(x)
-})%>%t(.)
-```
-
-
-```{r}
-saveRDS(mood.industry.data, "mood.industry.data.with.prob.rds")
-```
 
