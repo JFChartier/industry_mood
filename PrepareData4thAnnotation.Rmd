@@ -180,7 +180,7 @@ mood.industry.data.with.prob=cbind(mood.industry.data, all.new.annotation.prob)
 
 ###save
 ```{r}
-saveRDS(mood.industry.data, "mood.industry.data.with.prob.4th.rds")
+saveRDS(mood.industry.data.with.prob, "mood.industry.data.with.prob.4th.rds")
 ```
 
 
