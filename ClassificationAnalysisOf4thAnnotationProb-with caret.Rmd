@@ -116,9 +116,9 @@ id.train=mood.industry.data$training.set==T
 ```
 
 #Combine features
-##add meta data
+##keep relevant features from data
 ```{r}
-data.classification=mood.industry.data#[,c(3:5,8, 10:13)]
+data.classification=mood.industry.data[,c("sponsor.feature", "type.feature", "act.feature", "label_of_class", "training.set", "is.not.consultation.prob","statement.advocacy.prob", "statement.institution.prob", "statement.industry.prob")]
 ```
 
 ##add word-matrix frequency
@@ -168,12 +168,14 @@ data.classification.test=data.classification[id.train==F, ]
 #Classification based on threshold selection
 
 ##set results table
+create empty dataframe.  
 ```{r}
 evaluation.global=data.frame(annotation=character(4), F1=numeric(4), Recall=numeric(4), Precision=numeric(4), AUC=numeric(4), Kappa=numeric(4), Accuracy=numeric(4), stringsAsFactors = F)
 ```
 
 
 ##subset of id train
+subset a training set. 2/3 for training
 ```{r}
 seed=123
 id.sub.train <- sample(nrow(data.classification.train), 2/3 * nrow(data.classification.train))
@@ -181,6 +183,7 @@ id.sub.train <- sample(nrow(data.classification.train), 2/3 * nrow(data.classifi
 
 ##is.not.consultation annotation
 ###set features
+keep all features except class labels other than is.not.consultation annotation
 ```{r}
 #
 # data.classification.train.target = data.classification.train[,-c("label_of_class", "statement.advocacy.prob", "statement.institution.prob", "statement.industry.prob")]
@@ -254,36 +257,36 @@ huxtable::as_huxtable(eval.of.annotation$byClass,add_colnames=T, add_rownames=T)
 evaluation.global[1,]=c("is.not.consultation", eval.of.annotation$byClass["F1"], eval.of.annotation$byClass["Recall"], eval.of.annotation$byClass["Precision"], pROC::auc(rocCurve.of.annot), eval.of.annotation$overall["Kappa"], eval.of.annotation$overall["Accuracy"])
 ```
 
-##is.not.consultation without prob
-###train on sub training set
-```{r}
+<!-- ##is.not.consultation without prob -->
+<!-- ###train on sub training set -->
+<!-- ```{r} -->
 
-rf.notConsult.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.train.target[id.sub.train,], num.trees=20000, num.threads=6, classification=T, importance = "impurity", probability = F)
+<!-- rf.notConsult.model=ranger::ranger(dependent.variable.name = "targeted.class", data=data.classification.train.target[id.sub.train,], num.trees=20000, num.threads=6, classification=T, importance = "impurity", probability = F) -->
 
-#View(rf.notConsult.model$variable.importance, title = "impurity over is.not.consultation")
+<!-- #View(rf.notConsult.model$variable.importance, title = "impurity over is.not.consultation") -->
 
-```
+<!-- ``` -->
 
-###Prediction on remaining 1/3 of training set
-```{r}
+<!-- ###Prediction on remaining 1/3 of training set -->
+<!-- ```{r} -->
 
-rf.notConsul.pred=predict(rf.notConsult.model,data =  data.classification.train.target[-id.sub.train,])
+<!-- rf.notConsul.pred=predict(rf.notConsult.model,data =  data.classification.train.target[-id.sub.train,]) -->
 
-observed=data.classification.train.target$targeted.class[-id.sub.train]
+<!-- observed=data.classification.train.target$targeted.class[-id.sub.train] -->
 
-predicted=rf.notConsul.pred$predictions
+<!-- predicted=rf.notConsul.pred$predictions -->
 
-```
+<!-- ``` -->
 
-###evaluation on confusion matrix
-```{r}
-eval.of.annotation<-caret::confusionMatrix(data=predicted, reference=observed, mode="everything", positive="TRUE")
+<!-- ###evaluation on confusion matrix -->
+<!-- ```{r} -->
+<!-- eval.of.annotation<-caret::confusionMatrix(data=predicted, reference=observed, mode="everything", positive="TRUE") -->
 
-huxtable::as_huxtable(eval.of.annotation$overall,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
+<!-- huxtable::as_huxtable(eval.of.annotation$overall,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.) -->
 
-huxtable::as_huxtable(eval.of.annotation$byClass,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.)
+<!-- huxtable::as_huxtable(eval.of.annotation$byClass,add_colnames=T, add_rownames=T)%>%huxtable::theme_basic(.) -->
 
-```
+<!-- ``` -->
 
 ##institution annotation
 ###set features
@@ -509,10 +512,16 @@ changer la sélection des feature pour les prédiction sur le test set
 ##is.not.consultation annotation
 ###set features
 ```{r}
-data.classification.target = data.classification[,-c(4,6:8)]
+# data.classification.target = data.classification
+# 
+# data.classification.target$targeted.class=data.classification.target$is.not.consultation.prob
+# data.classification.target$is.not.consultation.prob=NULL
+
+
+data.classification.target = data.classification %>% subset(., select = -c(label_of_class, statement.advocacy.prob, statement.institution.prob, statement.industry.prob))
 
 data.classification.target$targeted.class=data.classification.target$is.not.consultation.prob
-data.classification.target$is.not.consultation.prob=NULL
+data.classification.train.target$is.not.consultation.prob=NULL
 
 ```
 
@@ -541,11 +550,16 @@ pred.of.noConsult.prob=rf.notConsul.pred$predictions[,"TRUE"]
 ##industry annotation
 ###set features
 ```{r}
-data.classification.target = data.classification[,-c(4:7)]
+# data.classification.target = data.classification[,-c(4:7)]
+# 
+# data.classification.target$targeted.class=data.classification.target$statement.industry.prob
+# data.classification.target$statement.industry.prob=NULL
+
+
+data.classification.target = data.classification %>% subset(., select = -c(label_of_class, statement.institution.prob, is.not.consultation.prob, statement.advocacy.prob))
 
 data.classification.target$targeted.class=data.classification.target$statement.industry.prob
 data.classification.target$statement.industry.prob=NULL
-
 ```
 
 ###set threshold for classification
